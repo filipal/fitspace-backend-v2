@@ -94,6 +94,24 @@ curl http://localhost:8080/
 curl http://localhost:8080/health
 ```
 
+### 🔐 Authentication
+
+- Configure a JWT secret (recommended):
+  ```bash
+  export JWT_SECRET="super-secret-value"
+  ```
+- Optionally protect token issuance with an API key:
+  ```bash
+  export AUTH_API_KEY="backend-shared-key"
+  ```
+- Obtain an access token for a user:
+  ```bash
+  curl -X POST http://localhost:8080/api/auth/token \
+    -H "Content-Type: application/json" \
+    -d '{"userId": "user-123", "apiKey": "backend-shared-key"}'
+  ```
+  Response contains a `token`, `tokenType`, `expiresIn`, and a ready-to-use `headers.Authorization` value for avatar routes.
+
 ### Production Testing
 ```bash
 # Test production deployment

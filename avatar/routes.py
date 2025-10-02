@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, abort, jsonify, request
 
+from auth import authenticate_request, require_user_access
+
 from . import repository
 from .repository import (
     AvatarNotFoundError,
@@ -17,6 +19,18 @@ avatar_bp = Blueprint("avatar", __name__, url_prefix="/api")
 
 # Maximum number of avatars returned from list endpoint.
 _LIST_LIMIT = 5
+
+
+# ---------------------------------------------------------------------------
+# Authentication hooks
+# ---------------------------------------------------------------------------
+
+
+@avatar_bp.before_request
+def _enforce_authentication():
+    """Ensure requests hitting the avatar blueprint are authenticated."""
+
+    authenticate_request()
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +149,11 @@ def _apply_payload(
         abort(400, description="Avatar identifier is invalid.")
     return avatar
 
+def _require_user_scope(user_id: str) -> None:
+    """Abort the request when the authenticated user differs from ``user_id``."""
+
+    require_user_access(user_id)
+
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -143,12 +162,14 @@ def _apply_payload(
 
 @avatar_bp.route("/users/<user_id>/avatars", methods=["GET"])
 def list_avatars(user_id: str):
+    _require_user_scope(user_id)
     response = repository.list_avatars(user_id, limit=_LIST_LIMIT)
     return jsonify(response)
 
 
 @avatar_bp.route("/users/<user_id>/avatars", methods=["POST"])
 def create_avatar(user_id: str):
+    _require_user_scope(user_id)
     payload = request.get_json(silent=True)
     if payload is None:
         abort(400, description="Request body must contain JSON data.")
@@ -159,6 +180,7 @@ def create_avatar(user_id: str):
 
 @avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["GET"])
 def get_avatar(user_id: str, avatar_id: str):
+    _require_user_scope(user_id)
     try:
         avatar = repository.get_avatar(user_id, avatar_id)
     except AvatarNotFoundError as exc:
@@ -170,6 +192,7 @@ def get_avatar(user_id: str, avatar_id: str):
 
 @avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["PUT"])
 def update_avatar(user_id: str, avatar_id: str):
+    _require_user_scope(user_id)
     payload = request.get_json(silent=True)
     if payload is None:
         abort(400, description="Request body must contain JSON data.")
