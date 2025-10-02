@@ -1,7 +1,9 @@
 from flask import Flask, jsonify, request
-import os
+
+from avatar import avatar_bp
 
 app = Flask(__name__)
+app.register_blueprint(avatar_bp)
 
 # Health check endpoint (required by App Runner)
 @app.route('/health')
