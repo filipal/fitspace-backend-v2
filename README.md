@@ -37,7 +37,20 @@ which python
 pip install -r requirements.txt
 ```
 
-### 4. Run Local Development Server
+### 4. Database Setup
+
+Set the `DATABASE_URL` environment variable to point to your PostgreSQL instance and apply the schema migrations:
+
+```bash
+export DATABASE_URL="postgresql://user:password@localhost:5432/fitspace"
+
+# Apply schema (idempotent)
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+This script creates the required tables (`users`, `avatars`, `avatar_basic_measurements`, `avatar_body_measurements`, and `avatar_morph_targets`) and enforces the five-avatar-per-user quota via a slot constraint.
+
+### 5. Run Local Development Server
 ```bash
 # Method 1: Direct Python execution
 python3 app.py

@@ -1,21 +1,19 @@
 """Blueprint with endpoints for managing avatar configurations."""
 from __future__ import annotations
 
-import uuid
 from collections.abc import Iterable as IterableABC
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, abort, jsonify, request
 
+from . import repository
+from .repository import (
+    AvatarNotFoundError,
+    AvatarQuotaExceededError,
+    DuplicateAvatarNameError,
+)
+
 avatar_bp = Blueprint("avatar", __name__, url_prefix="/api")
-
-# ---------------------------------------------------------------------------
-# In-memory persistence
-# ---------------------------------------------------------------------------
-
-# The data store is a nested mapping of user IDs -> avatar ID -> avatar payload.
-_AVATAR_STORE: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
 # Maximum number of avatars returned from list endpoint.
 _LIST_LIMIT = 5
@@ -24,14 +22,6 @@ _LIST_LIMIT = 5
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _current_timestamp() -> str:
-    """Return an ISO-8601 UTC timestamp string."""
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
-
-def _get_user_store(user_id: str) -> Dict[str, Dict[str, Any]]:
-    return _AVATAR_STORE.setdefault(user_id, {})
 
 
 def _normalize_measurements(section: Optional[Dict[str, Any]], *, section_name: str) -> Dict[str, float]:
@@ -94,28 +84,12 @@ def _normalize_morph_targets(payload: Any) -> List[Dict[str, Any]]:
     ]
 
 
-def _serialize_avatar(user_id: str, avatar_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": avatar_id,
-        "userId": user_id,
-        "name": payload.get("name", "Untitled Avatar"),
-        "basicMeasurements": payload.get("basicMeasurements", {}),
-        "bodyMeasurements": payload.get("bodyMeasurements", {}),
-        "morphTargets": payload.get("morphTargets", []),
-        "createdAt": payload.get("createdAt"),
-        "updatedAt": payload.get("updatedAt"),
-    }
-
-
-def _require_avatar(user_id: str, avatar_id: str) -> Dict[str, Any]:
-    store = _get_user_store(user_id)
-    avatar = store.get(avatar_id)
-    if avatar is None:
-        abort(404, description="Avatar not found.")
-    return avatar
-
-
-def _apply_payload(user_id: str, payload: Dict[str, Any], *, avatar_id: Optional[str] = None) -> Dict[str, Any]:
+def _apply_payload(
+    user_id: str,
+    payload: Dict[str, Any],
+    *,
+    avatar_id: Optional[str] = None,
+) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         abort(400, description="Request payload must be a JSON object.")
 
@@ -131,28 +105,35 @@ def _apply_payload(user_id: str, payload: Dict[str, Any], *, avatar_id: Optional
     )
     morph_targets = _normalize_morph_targets(payload.get("morphTargets"))
 
-    store = _get_user_store(user_id)
+    avatar_name = name if isinstance(name, str) else ""
 
-    if avatar_id is None:
-        avatar_id = str(uuid.uuid4())
-        created_at = _current_timestamp()
-    else:
-        created_at = _require_avatar(user_id, avatar_id).get("createdAt", _current_timestamp())
-
-    timestamp = _current_timestamp()
-    avatar_name = name if isinstance(name, str) and name.strip() else "Untitled Avatar"
-
-    avatar_payload = {
-        "name": avatar_name,
-        "basicMeasurements": basic_measurements,
-        "bodyMeasurements": body_measurements,
-        "morphTargets": morph_targets,
-        "createdAt": created_at,
-        "updatedAt": timestamp,
-    }
-
-    store[avatar_id] = avatar_payload
-    return _serialize_avatar(user_id, avatar_id, avatar_payload)
+    try:
+        if avatar_id is None:
+            avatar = repository.create_avatar(
+                user_id,
+                name=avatar_name,
+                basic_measurements=basic_measurements,
+                body_measurements=body_measurements,
+                morph_targets=morph_targets,
+            )
+        else:
+            avatar = repository.update_avatar(
+                user_id,
+                avatar_id,
+                name=avatar_name,
+                basic_measurements=basic_measurements,
+                body_measurements=body_measurements,
+                morph_targets=morph_targets,
+            )
+    except DuplicateAvatarNameError as exc:
+        abort(409, description=str(exc))
+    except AvatarQuotaExceededError as exc:
+        abort(409, description=str(exc))
+    except AvatarNotFoundError as exc:
+        abort(404, description=str(exc))
+    except ValueError:
+        abort(400, description="Avatar identifier is invalid.")
+    return avatar
 
 
 # ---------------------------------------------------------------------------
@@ -162,21 +143,7 @@ def _apply_payload(user_id: str, payload: Dict[str, Any], *, avatar_id: Optional
 
 @avatar_bp.route("/users/<user_id>/avatars", methods=["GET"])
 def list_avatars(user_id: str):
-    store = _get_user_store(user_id)
-    serialized = [
-        _serialize_avatar(user_id, avatar_id, payload)
-        for avatar_id, payload in sorted(
-            store.items(), key=lambda item: (item[1].get("createdAt") or "", item[0])
-        )
-    ]
-    items = serialized[:_LIST_LIMIT]
-    response = {
-        "userId": user_id,
-        "limit": _LIST_LIMIT,
-        "count": len(items),
-        "total": len(serialized),
-        "items": items,
-    }
+    response = repository.list_avatars(user_id, limit=_LIST_LIMIT)
     return jsonify(response)
 
 
@@ -192,8 +159,13 @@ def create_avatar(user_id: str):
 
 @avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["GET"])
 def get_avatar(user_id: str, avatar_id: str):
-    payload = _require_avatar(user_id, avatar_id)
-    return jsonify(_serialize_avatar(user_id, avatar_id, payload))
+    try:
+        avatar = repository.get_avatar(user_id, avatar_id)
+    except AvatarNotFoundError as exc:
+        abort(404, description=str(exc))
+    except ValueError:
+        abort(400, description="Avatar identifier is invalid.")
+    return jsonify(avatar)
 
 
 @avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["PUT"])
