@@ -212,3 +212,6 @@ Example request payload that exercises the extended avatar metadata (matching th
 ```
 
 The accompanying unit tests in `tests/test_avatar_routes.py` cover both valid and invalid combinations so that integrations can rely on consistent HTTP 400 responses when a value falls outside the documented ranges.
+## ⚙️ Frontend konfiguracija avatara
+
+Ako frontend koristi ovaj backend servis, konfiguriraj varijablu okruženja `VITE_AVATAR_API_BASE_URL` tako da pokazuje na bazni URL koji već završava s `/api/users/`. Servis `avatarApi` unutar frontenda interpolira `userId` u nastavak putanje (npr. `http://localhost:8080/api/users/<USER_ID>/avatars`), pa je obavezan završni kosac prije interpolacije korisničkog identifikator

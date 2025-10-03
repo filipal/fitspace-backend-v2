@@ -17,7 +17,7 @@ def health_check():
 
 @app.route('/')
 def hello():
-    return jsonify({"message": "Hello from Flask on App Runner!"})
+    return jsonify({"message": "Fitspace Backend API"})
 
 # Simple GET endpoint for testing
 @app.route('/api/users', methods=['GET'])
