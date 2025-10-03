@@ -20,6 +20,10 @@ avatar_bp = Blueprint("avatar", __name__, url_prefix="/api")
 # Maximum number of avatars returned from list endpoint.
 _LIST_LIMIT = 5
 
+_ALLOWED_GENDERS = {"female", "male", "non_binary", "unspecified"}
+_ALLOWED_AGE_RANGES = {"child", "teen", "young_adult", "adult", "mature", "senior"}
+_ALLOWED_CREATION_MODES = {"manual", "scan", "preset", "import"}
+_ALLOWED_SOURCES = {"web", "ios", "android", "kiosk", "api", "integration"}
 
 # ---------------------------------------------------------------------------
 # Authentication hooks
@@ -112,6 +116,48 @@ def _apply_payload(
     if name is not None and not isinstance(name, str):
         abort(400, description="Avatar name must be a string.")
 
+    def _normalize_enum(value: Optional[Any], *, field: str, allowed: set[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            abort(400, description=f"{field} must be a string.")
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized not in allowed:
+            allowed_values = ", ".join(sorted(allowed))
+            abort(400, description=f"{field} must be one of: {allowed_values}.")
+        return normalized
+
+    def _normalize_optional_string(value: Optional[Any], *, field: str) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            abort(400, description=f"{field} must be a string.")
+        normalized = value.strip()
+        return normalized or None
+
+    gender = _normalize_enum(payload.get("gender"), field="gender", allowed=_ALLOWED_GENDERS)
+    age_range = _normalize_enum(
+        payload.get("ageRange"), field="ageRange", allowed=_ALLOWED_AGE_RANGES
+    )
+    creation_mode = _normalize_enum(
+        payload.get("creationMode"), field="creationMode", allowed=_ALLOWED_CREATION_MODES
+    )
+    source = _normalize_enum(payload.get("source"), field="source", allowed=_ALLOWED_SOURCES)
+
+    quick_mode_value = payload.get("quickMode")
+    if quick_mode_value is None:
+        quick_mode = False
+    elif isinstance(quick_mode_value, bool):
+        quick_mode = quick_mode_value
+    else:
+        abort(400, description="quickMode must be a boolean value.")
+
+    created_by_session = _normalize_optional_string(
+        payload.get("createdBySession"), field="createdBySession"
+    )
+
     basic_measurements = _normalize_measurements(
         payload.get("basicMeasurements"), section_name="basicMeasurements"
     )
@@ -127,6 +173,12 @@ def _apply_payload(
             avatar = repository.create_avatar(
                 user_id,
                 name=avatar_name,
+                gender=gender,
+                age_range=age_range,
+                creation_mode=creation_mode,
+                source=source,
+                quick_mode=quick_mode,
+                created_by_session=created_by_session,
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
@@ -137,6 +189,12 @@ def _apply_payload(
                 user_id,
                 avatar_id,
                 name=avatar_name,
+                gender=gender,
+                age_range=age_range,
+                creation_mode=creation_mode,
+                source=source,
+                quick_mode=quick_mode,
+                created_by_session=created_by_session,
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,

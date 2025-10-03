@@ -81,6 +81,30 @@ The `users` table now persists additional authentication metadata so that avatar
 >     ON users (session_id) WHERE session_id IS NOT NULL;
 > ```
 
+#### Avatar metadata columns
+
+The `avatars` table captures additional metadata used by the Fitspace clients when generating avatars. Each value is validated by the API and stored in the database for auditing purposes:
+
+- `gender` – one of `female`, `male`, `non_binary`, `unspecified`
+- `age_range` – one of `child`, `teen`, `young_adult`, `adult`, `mature`, `senior`
+- `creation_mode` – one of `manual`, `scan`, `preset`, `import`
+- `source` – one of `web`, `ios`, `android`, `kiosk`, `api`, `integration`
+- `quick_mode` – boolean flag indicating if the avatar was generated via the quick workflow (defaults to `false`)
+- `created_by_session` – optional session identifier that created the avatar (separate from the owning user ID)
+
+> **Migrating existing databases**
+>
+> Apply the following statements if you are extending a pre-existing `avatars` table:
+>
+> ```sql
+> ALTER TABLE avatars
+>     ADD COLUMN IF NOT EXISTS gender TEXT,
+>     ADD COLUMN IF NOT EXISTS age_range TEXT,
+>     ADD COLUMN IF NOT EXISTS creation_mode TEXT,
+>     ADD COLUMN IF NOT EXISTS source TEXT,
+>     ADD COLUMN IF NOT EXISTS quick_mode BOOLEAN NOT NULL DEFAULT FALSE,
+>     ADD COLUMN IF NOT EXISTS created_by_session TEXT;
+> ```
 
 ### 5. Run Local Development Server
 ```bash
@@ -125,6 +149,8 @@ curl http://localhost:8080/health
 curl http://localhost:8080/
 curl http://localhost:8080/health
 ```
+# Run unit tests (validation coverage for avatar metadata)
+python -m unittest discover -s tests
 
 ### 🔐 Authentication
 
@@ -160,3 +186,29 @@ curl http://localhost:8080/health
 curl https://tea9as8upn.eu-central-1.awsapprunner.com/
 curl https://tea9as8upn.eu-central-1.awsapprunner.com/health
 ```
+### Avatar metadata scenarios
+
+Example request payload that exercises the extended avatar metadata (matching the validation rules enforced by the API):
+
+```json
+{
+  "name": "Runner",
+  "gender": "female",
+  "ageRange": "adult",
+  "creationMode": "manual",
+  "source": "web",
+  "quickMode": true,
+  "createdBySession": "session-xyz",
+  "basicMeasurements": {
+    "height": 172.4
+  },
+  "bodyMeasurements": {
+    "waist": 81.2
+  },
+  "morphTargets": [
+    {"id": "leg_length", "value": 0.25}
+  ]
+}
+```
+
+The accompanying unit tests in `tests/test_avatar_routes.py` cover both valid and invalid combinations so that integrations can rely on consistent HTTP 400 responses when a value falls outside the documented ranges.

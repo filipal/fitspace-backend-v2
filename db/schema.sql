@@ -19,12 +19,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_email_key
 CREATE UNIQUE INDEX IF NOT EXISTS users_session_id_key
     ON users (session_id)
     WHERE session_id IS NOT NULL;
-    
+
 CREATE TABLE IF NOT EXISTS avatars (
     id UUID PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     slot INTEGER NOT NULL,
+    gender TEXT,
+    age_range TEXT,
+    creation_mode TEXT,
+    source TEXT,
+    quick_mode BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by_session TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT avatars_slot_range CHECK (slot BETWEEN 1 AND 5),

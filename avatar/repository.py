@@ -254,6 +254,12 @@ def _row_to_avatar(row: Dict[str, object], *, basic, body, morphs) -> Dict[str, 
         "id": str(row["id"]),
         "userId": row["user_id"],
         "name": row["name"],
+        "gender": row.get("gender"),
+        "ageRange": row.get("age_range"),
+        "creationMode": row.get("creation_mode"),
+        "source": row.get("source"),
+        "quickMode": bool(row.get("quick_mode")) if row.get("quick_mode") is not None else False,
+        "createdBySession": row.get("created_by_session"),
         "basicMeasurements": basic,
         "bodyMeasurements": body,
         "morphTargets": morphs,
@@ -278,8 +284,23 @@ def list_avatars(
 
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, user_id, name, created_at, updated_at "
-                "FROM avatars WHERE user_id = %s ORDER BY created_at, id",
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    gender,
+                    age_range,
+                    creation_mode,
+                    source,
+                    quick_mode,
+                    created_by_session,
+                    created_at,
+                    updated_at
+                FROM avatars
+                WHERE user_id = %s
+                ORDER BY created_at, id
+                """,
                 (user_id,),
             )
             rows = cur.fetchall()
@@ -304,8 +325,22 @@ def get_avatar(user_id: str, avatar_id: str) -> Dict[str, object]:
     with _connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, user_id, name, created_at, updated_at FROM avatars "
-                "WHERE id = %s AND user_id = %s",
+                """
+                SELECT
+                    id,
+                    user_id,
+                    name,
+                    gender,
+                    age_range,
+                    creation_mode,
+                    source,
+                    quick_mode,
+                    created_by_session,
+                    created_at,
+                    updated_at
+                FROM avatars
+                WHERE id = %s AND user_id = %s
+                """,
                 (avatar_uuid, user_id),
             )
             row = cur.fetchone()
@@ -321,6 +356,12 @@ def create_avatar(
     user_id: str,
     *,
     name: str,
+    gender: Optional[str],
+    age_range: Optional[str],
+    creation_mode: Optional[str],
+    source: Optional[str],
+    quick_mode: bool,
+    created_by_session: Optional[str],
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, float]],
@@ -336,9 +377,45 @@ def create_avatar(
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "INSERT INTO avatars (id, user_id, name, slot) "
-                    "VALUES (%s, %s, %s, %s) RETURNING id, user_id, name, created_at, updated_at",
-                    (avatar_uuid, user_id, avatar_name, slot),
+                    """
+                    INSERT INTO avatars (
+                        id,
+                        user_id,
+                        name,
+                        slot,
+                        gender,
+                        age_range,
+                        creation_mode,
+                        source,
+                        quick_mode,
+                        created_by_session
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING
+                        id,
+                        user_id,
+                        name,
+                        gender,
+                        age_range,
+                        creation_mode,
+                        source,
+                        quick_mode,
+                        created_by_session,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        avatar_uuid,
+                        user_id,
+                        avatar_name,
+                        slot,
+                        gender,
+                        age_range,
+                        creation_mode,
+                        source,
+                        quick_mode,
+                        created_by_session,
+                    ),
                 )
                 row = cur.fetchone()
         except errors.UniqueViolation as exc:
@@ -365,6 +442,12 @@ def update_avatar(
     avatar_id: str,
     *,
     name: str,
+    gender: Optional[str],
+    age_range: Optional[str],
+    creation_mode: Optional[str],
+    source: Optional[str],
+    quick_mode: bool,
+    created_by_session: Optional[str],
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, float]],
@@ -389,9 +472,41 @@ def update_avatar(
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "UPDATE avatars SET name = %s, updated_at = NOW() "
-                    "WHERE id = %s RETURNING id, user_id, name, created_at, updated_at",
-                    (avatar_name, avatar_uuid),
+                    """
+                    UPDATE avatars
+                    SET
+                        name = %s,
+                        gender = %s,
+                        age_range = %s,
+                        creation_mode = %s,
+                        source = %s,
+                        quick_mode = %s,
+                        created_by_session = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING
+                        id,
+                        user_id,
+                        name,
+                        gender,
+                        age_range,
+                        creation_mode,
+                        source,
+                        quick_mode,
+                        created_by_session,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        avatar_name,
+                        gender,
+                        age_range,
+                        creation_mode,
+                        source,
+                        quick_mode,
+                        created_by_session,
+                        avatar_uuid,
+                    ),
                 )
                 updated = cur.fetchone()
         except errors.UniqueViolation as exc:
