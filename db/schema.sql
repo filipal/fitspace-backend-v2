@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS avatars (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT avatars_slot_range CHECK (slot BETWEEN 1 AND 5),
+    CONSTRAINT avatars_creation_mode_check CHECK (
+        creation_mode IS NULL OR creation_mode IN ('manual', 'scan', 'preset', 'import')
+    ),
     CONSTRAINT avatars_user_id_slot_key UNIQUE (user_id, slot)
 );
 

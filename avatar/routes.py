@@ -24,6 +24,7 @@ _ALLOWED_GENDERS = {"female", "male", "non_binary", "unspecified"}
 _ALLOWED_AGE_RANGES = {"child", "teen", "young_adult", "adult", "mature", "senior"}
 _ALLOWED_CREATION_MODES = {"manual", "scan", "preset", "import"}
 _ALLOWED_SOURCES = {"web", "ios", "android", "kiosk", "api", "integration"}
+_MEASUREMENT_STATUS_KEYS = {"creationMode"}
 
 # ---------------------------------------------------------------------------
 # Authentication hooks
@@ -42,20 +43,56 @@ def _enforce_authentication():
 # ---------------------------------------------------------------------------
 
 
-def _normalize_measurements(section: Optional[Dict[str, Any]], *, section_name: str) -> Dict[str, float]:
+def _normalize_enum(value: Optional[Any], *, field: str, allowed: set[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        abort(400, description=f"{field} must be a string.")
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        abort(400, description=f"{field} must be one of: {allowed_values}.")
+    return normalized
+
+
+def _normalize_optional_string(value: Optional[Any], *, field: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        abort(400, description=f"{field} must be a string.")
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_creation_mode(value: Optional[Any]) -> Optional[str]:
+    return _normalize_enum(value, field="creationMode", allowed=_ALLOWED_CREATION_MODES)
+
+
+def _normalize_measurements(
+    section: Optional[Dict[str, Any]], *, section_name: str
+) -> Tuple[Dict[str, float], Dict[str, Optional[str]]]:
     if section is None:
-        return {}
+        return {}, {}
     if not isinstance(section, dict):
         abort(400, description=f"{section_name} must be an object of numeric values.")
 
     normalized: Dict[str, float] = {}
+    statuses: Dict[str, Optional[str]] = {}
     for key, value in section.items():
         if not isinstance(key, str):
             abort(400, description=f"Measurement keys in {section_name} must be strings.")
+        if key in _MEASUREMENT_STATUS_KEYS:
+            if key == "creationMode":
+                normalized_status = _normalize_creation_mode(value)
+                if normalized_status is not None:
+                    statuses[key] = normalized_status
+            continue
         if not isinstance(value, (int, float)):
             abort(400, description=f"Measurement '{key}' in {section_name} must be a number.")
         normalized[key] = float(value)
-    return normalized
+    return normalized, statuses
 
 
 def _iter_morph_items(payload: Any) -> Iterable[Tuple[str, float]]:
@@ -116,34 +153,11 @@ def _apply_payload(
     if name is not None and not isinstance(name, str):
         abort(400, description="Avatar name must be a string.")
 
-    def _normalize_enum(value: Optional[Any], *, field: str, allowed: set[str]) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            abort(400, description=f"{field} must be a string.")
-        normalized = value.strip().lower()
-        if not normalized:
-            return None
-        if normalized not in allowed:
-            allowed_values = ", ".join(sorted(allowed))
-            abort(400, description=f"{field} must be one of: {allowed_values}.")
-        return normalized
-
-    def _normalize_optional_string(value: Optional[Any], *, field: str) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            abort(400, description=f"{field} must be a string.")
-        normalized = value.strip()
-        return normalized or None
-
     gender = _normalize_enum(payload.get("gender"), field="gender", allowed=_ALLOWED_GENDERS)
     age_range = _normalize_enum(
         payload.get("ageRange"), field="ageRange", allowed=_ALLOWED_AGE_RANGES
     )
-    creation_mode = _normalize_enum(
-        payload.get("creationMode"), field="creationMode", allowed=_ALLOWED_CREATION_MODES
-    )
+    creation_mode = _normalize_creation_mode(payload.get("creationMode"))
     source = _normalize_enum(payload.get("source"), field="source", allowed=_ALLOWED_SOURCES)
 
     quick_mode_value = payload.get("quickMode")
@@ -158,12 +172,28 @@ def _apply_payload(
         payload.get("createdBySession"), field="createdBySession"
     )
 
-    basic_measurements = _normalize_measurements(
+    basic_measurements, basic_statuses = _normalize_measurements(
         payload.get("basicMeasurements"), section_name="basicMeasurements"
     )
-    body_measurements = _normalize_measurements(
+    body_measurements, body_statuses = _normalize_measurements(
         payload.get("bodyMeasurements"), section_name="bodyMeasurements"
     )
+
+    basic_statuses = {k: v for k, v in basic_statuses.items() if v is not None}
+    body_statuses = {k: v for k, v in body_statuses.items() if v is not None}
+
+    measurement_creation_mode = basic_statuses.get("creationMode")
+    if measurement_creation_mode is None:
+        measurement_creation_mode = body_statuses.get("creationMode")
+
+    if measurement_creation_mode is not None:
+        if creation_mode is not None and creation_mode != measurement_creation_mode:
+            abort(
+                400,
+                description="creationMode provided in measurements does not match the top-level value.",
+            )
+        creation_mode = measurement_creation_mode
+
     morph_targets = _normalize_morph_targets(payload.get("morphTargets"))
 
     avatar_name = name if isinstance(name, str) else ""

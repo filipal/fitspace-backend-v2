@@ -48,6 +48,39 @@ class ApplyPayloadTests(unittest.TestCase):
             user_context=self.user_context,
         )
 
+    @patch("avatar.routes.repository.create_avatar")
+    def test_creation_mode_extracted_from_measurements(self, mock_create):
+        expected_avatar = {"id": "avatar-3"}
+        mock_create.return_value = expected_avatar
+
+        payload = {
+            "name": "Walker",
+            "basicMeasurements": {"height": 172.4, "creationMode": "Preset"},
+            "bodyMeasurements": {"chest": 95.2},
+        }
+
+        result = routes._apply_payload(
+            self.user_id,
+            payload,
+            user_context=None,
+        )
+
+        self.assertIs(result, expected_avatar)
+        mock_create.assert_called_once_with(
+            self.user_id,
+            name="Walker",
+            gender=None,
+            age_range=None,
+            creation_mode="preset",
+            source=None,
+            quick_mode=False,
+            created_by_session=None,
+            basic_measurements={"height": 172.4},
+            body_measurements={"chest": 95.2},
+            morph_targets=[],
+            user_context=None,
+        )
+
     @patch("avatar.routes.repository.update_avatar")
     def test_update_defaults_and_validation(self, mock_update):
         expected_avatar = {"id": "avatar-2"}
@@ -100,6 +133,17 @@ class ApplyPayloadTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 400)
         self.assertIn("quickMode", ctx.exception.description)
 
+    def test_conflicting_creation_mode_values_rejected(self):
+        payload = {
+            "creationMode": "Manual",
+            "basicMeasurements": {"creationMode": "Scan"},
+        }
+
+        with self.assertRaises(HTTPException) as ctx:
+            routes._apply_payload(self.user_id, payload)
+
+        self.assertEqual(ctx.exception.code, 400)
+        self.assertIn("creationMode", ctx.exception.description)
 
 if __name__ == "__main__":
     unittest.main()

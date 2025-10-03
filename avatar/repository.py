@@ -14,6 +14,10 @@ from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
 
 
+# Measurement keys that should not be treated as numeric values.
+_MEASUREMENT_STATUS_KEYS = {"creationMode"}
+
+
 # ---------------------------------------------------------------------------
 # Connection handling
 # ---------------------------------------------------------------------------
@@ -192,6 +196,9 @@ def _persist_measurements(
     body: Dict[str, float],
     morph_targets: Iterable[Tuple[str, float]],
 ) -> None:
+    basic = {k: v for k, v in basic.items() if k not in _MEASUREMENT_STATUS_KEYS}
+    body = {k: v for k, v in body.items() if k not in _MEASUREMENT_STATUS_KEYS}
+
     with conn.cursor() as cur:
         cur.execute("DELETE FROM avatar_basic_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_body_measurements WHERE avatar_id = %s", (avatar_id,))
