@@ -50,6 +50,38 @@ psql "$DATABASE_URL" -f db/schema.sql
 
 This script creates the required tables (`users`, `avatars`, `avatar_basic_measurements`, `avatar_body_measurements`, and `avatar_morph_targets`) and enforces the five-avatar-per-user quota via a slot constraint.
 
+#### Auth session metadata columns
+
+The `users` table now persists additional authentication metadata so that avatar requests can be correlated with the active session:
+
+- `email` – optional email address associated with the identity (case-insensitive unique index)
+- `session_id` – identifier of the active session (unique index)
+- `issued_at` / `expires_at` – timestamps describing the validity window of the access token
+- `access_token` – last access token observed for the user
+- `refresh_token` – last refresh token observed for the user
+- `updated_at` – automatically updated on every write
+
+> **Migrating existing databases**
+>
+> Apply the following statements if your database already contains the previous `users` schema:
+>
+> ```sql
+> ALTER TABLE users
+>     ADD COLUMN IF NOT EXISTS email TEXT,
+>     ADD COLUMN IF NOT EXISTS session_id TEXT,
+>     ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ,
+>     ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+>     ADD COLUMN IF NOT EXISTS access_token TEXT,
+>     ADD COLUMN IF NOT EXISTS refresh_token TEXT,
+>     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+>
+> CREATE UNIQUE INDEX IF NOT EXISTS users_email_key
+>     ON users (LOWER(email)) WHERE email IS NOT NULL;
+> CREATE UNIQUE INDEX IF NOT EXISTS users_session_id_key
+>     ON users (session_id) WHERE session_id IS NOT NULL;
+> ```
+
+
 ### 5. Run Local Development Server
 ```bash
 # Method 1: Direct Python execution
@@ -108,9 +140,19 @@ curl http://localhost:8080/health
   ```bash
   curl -X POST http://localhost:8080/api/auth/token \
     -H "Content-Type: application/json" \
-    -d '{"userId": "user-123", "apiKey": "backend-shared-key"}'
+    -d '{"userId": "user-123", "apiKey": "backend-shared-key", "email": "user@example.com", "sessionId": "session-abc", "refreshToken": "refresh-xyz"}'
   ```
-  Response contains a `token`, `tokenType`, `expiresIn`, and a ready-to-use `headers.Authorization` value for avatar routes.
+  Response contains the issued/expiry timestamps, the `Authorization` header and convenience headers (`X-User-Email`, `X-Session-Id`, `X-Refresh-Token`) ready for avatar routes.
+
+- When calling avatar endpoints you must forward the issued headers (or equivalent values) with each request:
+  ```bash
+  curl http://localhost:8080/api/users/user-123/avatars \
+    -H "Authorization: Bearer <token>" \
+    -H "X-User-Email: user@example.com" \
+    -H "X-Session-Id: session-abc" \
+    -H "X-Refresh-Token: refresh-xyz"
+  ```
+  Missing `X-User-Email` or `X-Session-Id` headers will result in a `400` response.
 
 ### Production Testing
 ```bash

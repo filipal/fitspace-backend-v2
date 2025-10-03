@@ -2,9 +2,24 @@
 
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    email TEXT,
+    session_id TEXT,
+    issued_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    access_token TEXT,
+    refresh_token TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_key
+    ON users (lower(email))
+    WHERE email IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_session_id_key
+    ON users (session_id)
+    WHERE session_id IS NOT NULL;
+    
 CREATE TABLE IF NOT EXISTS avatars (
     id UUID PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

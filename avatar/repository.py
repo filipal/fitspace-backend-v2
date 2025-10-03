@@ -6,7 +6,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import psycopg2
 from psycopg2 import errors
@@ -105,9 +105,72 @@ def _isoformat(dt: datetime) -> str:
     )
 
 
-def _ensure_user(conn, user_id: str) -> None:
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _ensure_user(conn, user_id: str, *, user_context: Optional[Dict[str, Any]] = None) -> None:
+    if not user_context:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (id) VALUES (%s) ON CONFLICT DO NOTHING",
+                (user_id,),
+            )
+        return
+
+    email = user_context.get("email")
+    session_id = user_context.get("session_id")
+    issued_at = _coerce_datetime(user_context.get("issued_at"))
+    expires_at = _coerce_datetime(user_context.get("expires_at"))
+    access_token = user_context.get("access_token")
+    refresh_token = user_context.get("refresh_token")
+
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO users (id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
+        cur.execute(
+            """
+            INSERT INTO users (
+                id,
+                email,
+                session_id,
+                issued_at,
+                expires_at,
+                access_token,
+                refresh_token
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE
+            SET
+                email = EXCLUDED.email,
+                session_id = EXCLUDED.session_id,
+                issued_at = EXCLUDED.issued_at,
+                expires_at = EXCLUDED.expires_at,
+                access_token = EXCLUDED.access_token,
+                refresh_token = EXCLUDED.refresh_token,
+                updated_at = NOW()
+            """,
+            (user_id, email, session_id, issued_at, expires_at, access_token, refresh_token),
+        )
 
 
 def _find_available_slot(conn, user_id: str) -> int:
@@ -204,9 +267,14 @@ def _row_to_avatar(row: Dict[str, object], *, basic, body, morphs) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 
-def list_avatars(user_id: str, *, limit: int = 5) -> Dict[str, object]:
+def list_avatars(
+    user_id: str,
+    *,
+    limit: int = 5,
+    user_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, object]:
     with _connection() as conn:
-        _ensure_user(conn, user_id)
+        _ensure_user(conn, user_id, user_context=user_context)
 
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -256,11 +324,12 @@ def create_avatar(
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, float]],
+    user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.uuid4()
 
     with _connection() as conn:
-        _ensure_user(conn, user_id)
+        _ensure_user(conn, user_id, user_context=user_context)
         slot = _find_available_slot(conn, user_id)
         avatar_name = name.strip() if name.strip() else "Untitled Avatar"
 
@@ -299,10 +368,12 @@ def update_avatar(
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, float]],
+    user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.UUID(avatar_id)
 
     with _connection() as conn:
+        _ensure_user(conn, user_id, user_context=user_context)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "SELECT id, user_id, name, slot FROM avatars WHERE id = %s AND user_id = %s",

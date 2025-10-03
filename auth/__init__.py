@@ -15,6 +15,7 @@ __all__ = [
     "authenticate_request",
     "require_user_access",
     "current_user_id",
+    "current_user_context",
 ]
 
 
@@ -70,31 +71,61 @@ def init_app(app) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _issue_token(user_id: str) -> Dict[str, Any]:
+def _issue_token(
+    user_id: str,
+    *,
+    email: Optional[str] = None,
+    session_id: Optional[str] = None,
+    refresh_token: Optional[str] = None,
+) -> Dict[str, Any]:
     """Create a signed JWT for the specified user."""
 
     now = datetime.now(timezone.utc)
     expiration = now + _get_expiration_delta()
-    payload = {
+    payload: Dict[str, Any] = {
         "sub": user_id,
         "iat": int(now.timestamp()),
         "exp": int(expiration.timestamp()),
         "scope": ["avatars:read", "avatars:write"],
     }
 
+    if email:
+        payload["email"] = email
+    if session_id:
+        payload["sid"] = session_id
+    if refresh_token:
+        payload["refreshToken"] = refresh_token
+
     token = jwt.encode(payload, _get_secret_key(), algorithm=_get_algorithm())
     if isinstance(token, bytes):
         token = token.decode("utf-8")
 
     headers = {"Authorization": f"Bearer {token}"}
-    return {
+    if email:
+        headers["X-User-Email"] = email
+    if session_id:
+        headers["X-Session-Id"] = session_id
+    if refresh_token:
+        headers["X-Refresh-Token"] = refresh_token
+
+    response: Dict[str, Any] = {
         "token": token,
         "tokenType": "Bearer",
         "expiresIn": int(_get_expiration_delta().total_seconds()),
+        "issuedAt": payload["iat"],
+        "expiresAt": payload["exp"],
         "user": {"id": user_id},
         "headers": headers,
     }
 
+    if email:
+        response["user"]["email"] = email
+    if session_id:
+        response["sessionId"] = session_id
+    if refresh_token:
+        response["refreshToken"] = refresh_token
+
+    return response
 
 # ---------------------------------------------------------------------------
 # Blueprint routes
@@ -117,6 +148,24 @@ def create_token():
         abort(401, description="Provided API key is invalid.")
 
     token_response = _issue_token(user_id)
+    email = payload.get("email")
+    if email is not None and not isinstance(email, str):
+        abort(400, description="If provided, 'email' must be a string.")
+
+    session_id = payload.get("sessionId") or payload.get("session_id")
+    if session_id is not None and not isinstance(session_id, str):
+        abort(400, description="If provided, 'sessionId' must be a string.")
+
+    refresh_token = payload.get("refreshToken") or payload.get("refresh_token")
+    if refresh_token is not None and not isinstance(refresh_token, str):
+        abort(400, description="If provided, 'refreshToken' must be a string.")
+
+    token_response = _issue_token(
+        user_id,
+        email=email,
+        session_id=session_id,
+        refresh_token=refresh_token,
+    )
     return jsonify(token_response)
 
 
@@ -151,9 +200,41 @@ def authenticate_request() -> str:
     if not user_id:
         abort(401, description="Authentication token is missing a subject (user).")
 
+    header_email = request.headers.get("X-User-Email") or decoded.get("email")
+    if header_email is None:
+        abort(400, description="Header 'X-User-Email' je obavezan za avatar API pozive.")
+
+    session_id = request.headers.get("X-Session-Id") or decoded.get("sid") or decoded.get(
+        "sessionId"
+    )
+    if not session_id:
+        abort(400, description="Header 'X-Session-Id' je obavezan za avatar API pozive.")
+
+    refresh_token = request.headers.get("X-Refresh-Token") or decoded.get("refreshToken")
+
+    issued_at_value = decoded.get("iat")
+    issued_at = (
+        datetime.fromtimestamp(int(issued_at_value), tz=timezone.utc)
+        if isinstance(issued_at_value, (int, float))
+        else None
+    )
+
+    expires_at_value = decoded.get("exp")
+    expires_at = (
+        datetime.fromtimestamp(int(expires_at_value), tz=timezone.utc)
+        if isinstance(expires_at_value, (int, float))
+        else None
+    )
+
     g.current_user = {
         "id": str(user_id),
         "scope": decoded.get("scope", []),
+        "email": str(header_email),
+        "session_id": str(session_id),
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "access_token": token,
+        "refresh_token": refresh_token,
     }
     return g.current_user["id"]
 
@@ -165,6 +246,12 @@ def current_user_id() -> Optional[str]:
         return g.current_user["id"]
     return None
 
+def current_user_context() -> Dict[str, Any]:
+    """Return full authentication context for the current request."""
+
+    if getattr(g, "current_user", None) is None:
+        authenticate_request()
+    return g.current_user
 
 def require_user_access(user_id: str) -> None:
     """Ensure the authenticated user can access the provided ``user_id``."""

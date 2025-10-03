@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, abort, jsonify, request
 
-from auth import authenticate_request, require_user_access
+from auth import authenticate_request, current_user_context, require_user_access
 
 from . import repository
 from .repository import (
@@ -103,6 +103,7 @@ def _apply_payload(
     payload: Dict[str, Any],
     *,
     avatar_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         abort(400, description="Request payload must be a JSON object.")
@@ -129,6 +130,7 @@ def _apply_payload(
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
+                user_context=user_context,
             )
         else:
             avatar = repository.update_avatar(
@@ -138,6 +140,7 @@ def _apply_payload(
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
+                user_context=user_context,
             )
     except DuplicateAvatarNameError as exc:
         abort(409, description=str(exc))
@@ -163,18 +166,24 @@ def _require_user_scope(user_id: str) -> None:
 @avatar_bp.route("/users/<user_id>/avatars", methods=["GET"])
 def list_avatars(user_id: str):
     _require_user_scope(user_id)
-    response = repository.list_avatars(user_id, limit=_LIST_LIMIT)
+    user_context = current_user_context()
+    response = repository.list_avatars(
+        user_id,
+        limit=_LIST_LIMIT,
+        user_context=user_context,
+    )
     return jsonify(response)
 
 
 @avatar_bp.route("/users/<user_id>/avatars", methods=["POST"])
 def create_avatar(user_id: str):
     _require_user_scope(user_id)
+    user_context = current_user_context()
     payload = request.get_json(silent=True)
     if payload is None:
         abort(400, description="Request body must contain JSON data.")
 
-    avatar = _apply_payload(user_id, payload)
+    avatar = _apply_payload(user_id, payload, user_context=user_context)
     return jsonify(avatar), 201
 
 
@@ -193,9 +202,15 @@ def get_avatar(user_id: str, avatar_id: str):
 @avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["PUT"])
 def update_avatar(user_id: str, avatar_id: str):
     _require_user_scope(user_id)
+    user_context = current_user_context()
     payload = request.get_json(silent=True)
     if payload is None:
         abort(400, description="Request body must contain JSON data.")
 
-    avatar = _apply_payload(user_id, payload, avatar_id=avatar_id)
+    avatar = _apply_payload(
+        user_id,
+        payload,
+        avatar_id=avatar_id,
+        user_context=user_context,
+    )
     return jsonify(avatar)
