@@ -69,6 +69,19 @@ def _normalize_optional_string(value: Optional[Any], *, field: str) -> Optional[
 def _normalize_creation_mode(value: Optional[Any]) -> Optional[str]:
     return _normalize_enum(value, field="creationMode", allowed=_ALLOWED_CREATION_MODES)
 
+def _normalize_optional_float(value: Optional[Any], *, field: str) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    abort(400, description=f"{field} must be a number.")
+
+
+def _normalize_float(value: Any, *, field: str) -> float:
+    result = _normalize_optional_float(value, field=field)
+    if result is None:
+        abort(400, description=f"{field} must be a number.")
+    return result
 
 def _normalize_measurements(
     section: Optional[Dict[str, Any]], *, section_name: str
@@ -95,48 +108,138 @@ def _normalize_measurements(
     return normalized, statuses
 
 
-def _iter_morph_items(payload: Any) -> Iterable[Tuple[str, float]]:
+def _normalize_quick_mode_settings(payload: Optional[Any]) -> Optional[Dict[str, Any]]:
     if payload is None:
-        return []
-    if isinstance(payload, dict):
-        iterable = payload.items()
-    elif isinstance(payload, IterableABC) and not isinstance(payload, (str, bytes)):
-        iterable = []
-        for entry in payload:
-            if isinstance(entry, dict):
-                morph_id = entry.get("id")
-                value = entry.get("value")
-                iterable.append((morph_id, value))
-            elif isinstance(entry, (list, tuple)) and len(entry) == 2:
-                iterable.append((entry[0], entry[1]))
-            else:
-                abort(400, description="Morph targets must be objects with 'id' and 'value'.")
-    else:
-        abort(400, description="Morph targets must be provided as an object or list of objects.")
-        return []
+        return None
+    if not isinstance(payload, dict):
+        abort(400, description="quickModeSettings must be an object.")
 
-    normalized_items: List[Tuple[str, float]] = []
-    for morph_id, value in iterable:
-        if morph_id is None:
-            abort(400, description="Morph targets require an 'id'.")
-        if not isinstance(morph_id, str):
-            morph_id = str(morph_id)
-        if not isinstance(value, (int, float)):
-            abort(400, description=f"Morph target '{morph_id}' value must be numeric.")
-        normalized_items.append((morph_id, float(value)))
-    return normalized_items
+    allowed_keys = {"bodyShape", "athleticLevel", "measurements"}
+    unexpected = [key for key in payload.keys() if key not in allowed_keys]
+    if unexpected:
+        joined = ", ".join(sorted(unexpected))
+        abort(400, description=f"quickModeSettings contains unsupported fields: {joined}.")
+
+    body_shape = payload.get("bodyShape")
+    if body_shape is not None and not isinstance(body_shape, str):
+        abort(400, description="quickModeSettings.bodyShape must be a string.")
+    if isinstance(body_shape, str):
+        body_shape = body_shape.strip().lower().replace(" ", "_") or None
+
+    athletic_level = payload.get("athleticLevel")
+    if athletic_level is not None and not isinstance(athletic_level, str):
+        abort(400, description="quickModeSettings.athleticLevel must be a string.")
+    if isinstance(athletic_level, str):
+        athletic_level = athletic_level.strip().lower().replace(" ", "_") or None
+
+    measurements_payload = payload.get("measurements")
+    measurements: Dict[str, float] = {}
+    if measurements_payload is not None:
+        if not isinstance(measurements_payload, dict):
+            abort(400, description="quickModeSettings.measurements must be an object of numbers.")
+        for key, value in measurements_payload.items():
+            if not isinstance(key, str):
+                abort(400, description="quickModeSettings.measurements keys must be strings.")
+            normalized_key = key.strip()
+            if not normalized_key:
+                abort(
+                    400,
+                    description="quickModeSettings.measurements keys must not be empty.",
+                )
+            measurements[normalized_key] = _normalize_float(
+                value, field=f"quickModeSettings.measurements['{normalized_key}']"
+            )
+
+    normalized: Dict[str, Any] = {}
+    if body_shape:
+        normalized["bodyShape"] = body_shape
+    if athletic_level:
+        normalized["athleticLevel"] = athletic_level
+    if measurements:
+        normalized["measurements"] = measurements
+
+    return normalized or None
+
+
+def _normalize_morph_entry(morph_id: Any, raw_value: Any) -> Dict[str, Any]:
+    if morph_id is None:
+        abort(400, description="Morph targets require an 'id'.")
+    if not isinstance(morph_id, str):
+        morph_id = str(morph_id)
+    morph_id = morph_id.strip()
+    if not morph_id:
+        abort(400, description="Morph target ids must not be empty.")
+
+    backend_key: Optional[str] = None
+    slider_value: Optional[float] = None
+    unreal_value: Optional[float] = None
+
+    if isinstance(raw_value, dict):
+        backend_key_value = raw_value.get("backendKey")
+        if backend_key_value is not None:
+            if not isinstance(backend_key_value, str):
+                backend_key_value = str(backend_key_value)
+            backend_key_value = backend_key_value.strip()
+            backend_key = backend_key_value or None
+        slider_candidate = raw_value.get("sliderValue")
+        if slider_candidate is None and "value" in raw_value:
+            slider_candidate = raw_value.get("value")
+        slider_value = _normalize_optional_float(
+            slider_candidate, field=f"morphTargets[{morph_id}].sliderValue"
+        )
+        unreal_value = _normalize_optional_float(
+            raw_value.get("unrealValue"), field=f"morphTargets[{morph_id}].unrealValue"
+        )
+    elif isinstance(raw_value, (int, float)):
+        slider_value = float(raw_value)
+    elif raw_value is None:
+        slider_value = None
+    else:
+        abort(
+            400,
+            description="Morph targets must be numbers or objects containing sliderValue/unrealValue.",
+        )
+
+    entry: Dict[str, Any] = {"id": morph_id}
+    if backend_key:
+        entry["backendKey"] = backend_key
+    if slider_value is not None:
+        entry["sliderValue"] = slider_value
+        entry["value"] = slider_value
+    if unreal_value is not None:
+        entry["unrealValue"] = unreal_value
+    return entry
 
 
 def _normalize_morph_targets(payload: Any) -> List[Dict[str, Any]]:
-    items = list(_iter_morph_items(payload))
-    collapsed: Dict[str, float] = {}
-    for morph_id, value in items:
-        collapsed[morph_id] = value
+    if payload is None:
+        return []
+    items: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        for morph_id, value in payload.items():
+            items.append(_normalize_morph_entry(morph_id, value))
+    elif isinstance(payload, IterableABC) and not isinstance(payload, (str, bytes)):
+        for entry in payload:
+            if isinstance(entry, dict):
+                morph_id = entry.get("id")
+                if morph_id is None:
+                    abort(400, description="Morph targets must include an 'id'.")
+                value: Any = entry
+            elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+                morph_id, value = entry
+            else:
+                abort(
+                    400,
+                    description="Morph targets must be provided as objects with id/value data.",
+                )
+            items.append(_normalize_morph_entry(morph_id, value))
+    else:
+        abort(400, description="Morph targets must be provided as an object or list of objects.")
+    collapsed: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        collapsed[item["id"]] = item
 
-    return [
-        {"id": morph_id, "value": value}
-        for morph_id, value in sorted(collapsed.items(), key=lambda pair: pair[0])
-    ]
+    return [collapsed[key] for key in sorted(collapsed.keys())]
 
 
 def _apply_payload(
@@ -160,11 +263,13 @@ def _apply_payload(
     creation_mode = _normalize_creation_mode(payload.get("creationMode"))
     source = _normalize_enum(payload.get("source"), field="source", allowed=_ALLOWED_SOURCES)
 
+    quick_mode_settings = _normalize_quick_mode_settings(payload.get("quickModeSettings"))
+
     quick_mode_value = payload.get("quickMode")
     if quick_mode_value is None:
-        quick_mode = False
+        quick_mode = bool(quick_mode_settings)
     elif isinstance(quick_mode_value, bool):
-        quick_mode = quick_mode_value
+        quick_mode = quick_mode_value or bool(quick_mode_settings)
     else:
         abort(400, description="quickMode must be a boolean value.")
 
@@ -212,6 +317,7 @@ def _apply_payload(
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
+                quick_mode_settings=quick_mode_settings,
                 user_context=user_context,
             )
         else:
@@ -228,6 +334,7 @@ def _apply_payload(
                 basic_measurements=basic_measurements,
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
+                quick_mode_settings=quick_mode_settings,
                 user_context=user_context,
             )
     except DuplicateAvatarNameError as exc:

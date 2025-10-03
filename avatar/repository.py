@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import psycopg2
 from psycopg2 import errors
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
 
 
@@ -194,7 +194,8 @@ def _persist_measurements(
     *,
     basic: Dict[str, float],
     body: Dict[str, float],
-    morph_targets: Iterable[Tuple[str, float]],
+    morph_targets: Iterable[Dict[str, Any]],
+    quick_mode_settings: Optional[Dict[str, Any]],
 ) -> None:
     basic = {k: v for k, v in basic.items() if k not in _MEASUREMENT_STATUS_KEYS}
     body = {k: v for k, v in body.items() if k not in _MEASUREMENT_STATUS_KEYS}
@@ -203,6 +204,7 @@ def _persist_measurements(
         cur.execute("DELETE FROM avatar_basic_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_body_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_morph_targets WHERE avatar_id = %s", (avatar_id,))
+        cur.execute("DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,))
 
         if basic:
             cur.executemany(
@@ -218,16 +220,105 @@ def _persist_measurements(
                 [(avatar_id, key, value) for key, value in body.items()],
             )
 
-        morph_items = list(morph_targets)
-        if morph_items:
+        morph_map: Dict[str, Dict[str, Any]] = {}
+        for item in morph_targets:
+            morph_id = str(item.get("id")) if item.get("id") is not None else ""
+            morph_id = morph_id.strip()
+            if not morph_id:
+                continue
+            backend_key = item.get("backendKey")
+            if isinstance(backend_key, str):
+                backend_key = backend_key.strip() or None
+            slider_value = item.get("sliderValue")
+            if slider_value is None and "value" in item:
+                slider_value = item.get("value")
+            if isinstance(slider_value, (int, float)):
+                slider_value = float(slider_value)
+            else:
+                slider_value = None
+            unreal_value = item.get("unrealValue")
+            if isinstance(unreal_value, (int, float)):
+                unreal_value = float(unreal_value)
+            else:
+                unreal_value = None
+            morph_map[morph_id] = {
+                "backend_key": backend_key,
+                "slider_value": slider_value,
+                "unreal_value": unreal_value,
+            }
+
+        if morph_map:
+            definition_records = [
+                (morph_id, data["backend_key"]) for morph_id, data in morph_map.items()
+            ]
             cur.executemany(
-                "INSERT INTO avatar_morph_targets (avatar_id, morph_id, value) "
-                "VALUES (%s, %s, %s)",
-                [(avatar_id, morph_id, value) for morph_id, value in morph_items],
+                """
+                INSERT INTO morph_definitions (id, backend_key)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE
+                SET
+                    backend_key = COALESCE(EXCLUDED.backend_key, morph_definitions.backend_key),
+                    updated_at = NOW()
+                """,
+                definition_records,
             )
 
+            cur.executemany(
+                """
+                INSERT INTO avatar_morph_targets (
+                    avatar_id,
+                    morph_id,
+                    backend_key,
+                    slider_value,
+                    unreal_value,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                """,
+                [
+                    (
+                        avatar_id,
+                        morph_id,
+                        data["backend_key"],
+                        data["slider_value"],
+                        data["unreal_value"],
+                    )
+                    for morph_id, data in morph_map.items()
+                ],
+            )
 
-def _fetch_measurements(conn, avatar_id: uuid.UUID) -> Tuple[Dict[str, float], Dict[str, float], List[Dict[str, float]]]:
+        if quick_mode_settings:
+            body_shape = quick_mode_settings.get("bodyShape")
+            if isinstance(body_shape, str):
+                body_shape = body_shape.strip() or None
+            athletic_level = quick_mode_settings.get("athleticLevel")
+            if isinstance(athletic_level, str):
+                athletic_level = athletic_level.strip() or None
+            measurements = quick_mode_settings.get("measurements")
+            if not isinstance(measurements, dict):
+                measurements = {}
+            cur.execute(
+                """
+                INSERT INTO avatar_quickmode_settings (
+                    avatar_id,
+                    body_shape,
+                    athletic_level,
+                    measurements,
+                    created_at,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                """,
+                (avatar_id, body_shape, athletic_level, Json(measurements)),
+            )
+def _fetch_measurements(
+    conn, avatar_id: uuid.UUID
+) -> Tuple[
+    Dict[str, float],
+    Dict[str, float],
+    List[Dict[str, Any]],
+    Optional[Dict[str, Any]],
+]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             "SELECT measurement_key, value FROM avatar_basic_measurements WHERE avatar_id = %s",
@@ -242,21 +333,83 @@ def _fetch_measurements(conn, avatar_id: uuid.UUID) -> Tuple[Dict[str, float], D
         body = {row["measurement_key"]: float(row["value"]) for row in cur.fetchall()}
 
         cur.execute(
-            "SELECT morph_id, value FROM avatar_morph_targets WHERE avatar_id = %s",
+            """
+            SELECT
+                amt.morph_id,
+                amt.backend_key,
+                amt.slider_value,
+                amt.unreal_value,
+                amt.updated_at,
+                md.backend_key AS definition_backend_key
+            FROM avatar_morph_targets AS amt
+            LEFT JOIN morph_definitions AS md ON md.id = amt.morph_id
+            WHERE amt.avatar_id = %s
+            """,
             (avatar_id,),
         )
-        morphs = [
-            {"id": row["morph_id"], "value": float(row["value"])}
-            for row in cur.fetchall()
-        ]
+        morphs: List[Dict[str, Any]] = []
+        for row in cur.fetchall():
+            slider_value = row.get("slider_value")
+            unreal_value = row.get("unreal_value")
+            backend_key = row.get("backend_key") or row.get("definition_backend_key")
+            updated_at = row.get("updated_at")
+            morph_item: Dict[str, Any] = {"id": row["morph_id"]}
+            if backend_key:
+                morph_item["backendKey"] = backend_key
+            if slider_value is not None:
+                morph_item["sliderValue"] = float(slider_value)
+                morph_item["value"] = float(slider_value)
+            if unreal_value is not None:
+                morph_item["unrealValue"] = float(unreal_value)
+            if isinstance(updated_at, datetime):
+                morph_item["updatedAt"] = _isoformat(updated_at)
+            morphs.append(morph_item)
+
+        cur.execute(
+            """
+            SELECT body_shape, athletic_level, measurements, updated_at
+            FROM avatar_quickmode_settings
+            WHERE avatar_id = %s
+            """,
+            (avatar_id,),
+        )
+        quick_row = cur.fetchone()
+
+    quick_mode_settings: Optional[Dict[str, Any]] = None
+    if quick_row:
+        body_shape = quick_row.get("body_shape")
+        athletic_level = quick_row.get("athletic_level")
+        measurements_value = quick_row.get("measurements") or {}
+        normalized_measurements: Dict[str, Any] = {}
+        if isinstance(measurements_value, dict):
+            for key, value in measurements_value.items():
+                if isinstance(value, (int, float)):
+                    normalized_measurements[str(key)] = float(value)
+                else:
+                    normalized_measurements[str(key)] = value
+        updated_at = quick_row.get("updated_at")
+        quick_mode_settings = {
+            "bodyShape": body_shape,
+            "athleticLevel": athletic_level,
+            "measurements": normalized_measurements,
+        }
+        if isinstance(updated_at, datetime):
+            quick_mode_settings["updatedAt"] = _isoformat(updated_at)
+        if not any(quick_mode_settings.values()):
+            quick_mode_settings = None
 
     morphs.sort(key=lambda item: item["id"])
-    return basic, body, morphs
+    return basic, body, morphs, quick_mode_settings
 
 
-def _row_to_avatar(row: Dict[str, object], *, basic, body, morphs) -> Dict[str, object]:
+def _row_to_avatar(
+    row: Dict[str, object], *, basic, body, morphs, quick_mode_settings
+) -> Dict[str, object]:
     created_at = row["created_at"] if isinstance(row["created_at"], datetime) else None
     updated_at = row["updated_at"] if isinstance(row["updated_at"], datetime) else None
+    quick_mode_flag = bool(row.get("quick_mode")) if row.get("quick_mode") is not None else False
+    if quick_mode_settings:
+        quick_mode_flag = quick_mode_flag or True
     return {
         "id": str(row["id"]),
         "userId": row["user_id"],
@@ -265,11 +418,12 @@ def _row_to_avatar(row: Dict[str, object], *, basic, body, morphs) -> Dict[str, 
         "ageRange": row.get("age_range"),
         "creationMode": row.get("creation_mode"),
         "source": row.get("source"),
-        "quickMode": bool(row.get("quick_mode")) if row.get("quick_mode") is not None else False,
+        "quickMode": quick_mode_flag,
         "createdBySession": row.get("created_by_session"),
         "basicMeasurements": basic,
         "bodyMeasurements": body,
         "morphTargets": morphs,
+        "quickModeSettings": quick_mode_settings,
         "createdAt": _isoformat(created_at) if created_at else None,
         "updatedAt": _isoformat(updated_at) if updated_at else None,
     }
@@ -314,8 +468,16 @@ def list_avatars(
 
         items: List[Dict[str, object]] = []
         for row in rows[:limit]:
-            basic, body, morphs = _fetch_measurements(conn, row["id"])
-            items.append(_row_to_avatar(row, basic=basic, body=body, morphs=morphs))
+            basic, body, morphs, quick_mode_settings = _fetch_measurements(conn, row["id"])
+            items.append(
+                _row_to_avatar(
+                    row,
+                    basic=basic,
+                    body=body,
+                    morphs=morphs,
+                    quick_mode_settings=quick_mode_settings,
+                )
+            )
 
         return {
             "userId": user_id,
@@ -355,8 +517,14 @@ def get_avatar(user_id: str, avatar_id: str) -> Dict[str, object]:
         if row is None:
             raise AvatarNotFoundError("Avatar not found.")
 
-        basic, body, morphs = _fetch_measurements(conn, avatar_uuid)
-        return _row_to_avatar(row, basic=basic, body=body, morphs=morphs)
+        basic, body, morphs, quick_mode_settings = _fetch_measurements(conn, avatar_uuid)
+        return _row_to_avatar(
+            row,
+            basic=basic,
+            body=body,
+            morphs=morphs,
+            quick_mode_settings=quick_mode_settings,
+        )
 
 
 def create_avatar(
@@ -371,7 +539,8 @@ def create_avatar(
     created_by_session: Optional[str],
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
-    morph_targets: List[Dict[str, float]],
+    morph_targets: List[Dict[str, Any]],
+    quick_mode_settings: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.uuid4()
@@ -437,11 +606,18 @@ def create_avatar(
             avatar_uuid,
             basic=basic_measurements,
             body=body_measurements,
-            morph_targets=[(item["id"], item["value"]) for item in morph_targets],
+            morph_targets=morph_targets,
+            quick_mode_settings=quick_mode_settings,
         )
 
-        basic, body, morphs = _fetch_measurements(conn, avatar_uuid)
-        return _row_to_avatar(row, basic=basic, body=body, morphs=morphs)
+        basic, body, morphs, quick_mode_data = _fetch_measurements(conn, avatar_uuid)
+        return _row_to_avatar(
+            row,
+            basic=basic,
+            body=body,
+            morphs=morphs,
+            quick_mode_settings=quick_mode_data,
+        )
 
 
 def update_avatar(
@@ -457,7 +633,8 @@ def update_avatar(
     created_by_session: Optional[str],
     basic_measurements: Dict[str, float],
     body_measurements: Dict[str, float],
-    morph_targets: List[Dict[str, float]],
+    morph_targets: List[Dict[str, Any]],
+    quick_mode_settings: Optional[Dict[str, Any]],
     user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.UUID(avatar_id)
@@ -528,8 +705,15 @@ def update_avatar(
             avatar_uuid,
             basic=basic_measurements,
             body=body_measurements,
-            morph_targets=[(item["id"], item["value"]) for item in morph_targets],
+            morph_targets=morph_targets,
+            quick_mode_settings=quick_mode_settings,
         )
 
-        basic, body, morphs = _fetch_measurements(conn, avatar_uuid)
-        return _row_to_avatar(updated, basic=basic, body=body, morphs=morphs)
+        basic, body, morphs, quick_mode_data = _fetch_measurements(conn, avatar_uuid)
+        return _row_to_avatar(
+            updated,
+            basic=basic,
+            body=body,
+            morphs=morphs,
+            quick_mode_settings=quick_mode_data,
+        )

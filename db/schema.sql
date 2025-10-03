@@ -58,11 +58,30 @@ CREATE TABLE IF NOT EXISTS avatar_body_measurements (
     PRIMARY KEY (avatar_id, measurement_key)
 );
 
+CREATE TABLE IF NOT EXISTS morph_definitions (
+    id TEXT PRIMARY KEY,
+    backend_key TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS avatar_morph_targets (
     avatar_id UUID NOT NULL REFERENCES avatars(id) ON DELETE CASCADE,
-    morph_id TEXT NOT NULL,
-    value DOUBLE PRECISION NOT NULL,
+    morph_id TEXT NOT NULL REFERENCES morph_definitions(id) ON DELETE CASCADE,
+    backend_key TEXT,
+    slider_value DOUBLE PRECISION,
+    unreal_value DOUBLE PRECISION,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (avatar_id, morph_id)
+);
+
+CREATE TABLE IF NOT EXISTS avatar_quickmode_settings (
+    avatar_id UUID PRIMARY KEY REFERENCES avatars(id) ON DELETE CASCADE,
+    body_shape TEXT,
+    athletic_level TEXT,
+    measurements JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS avatar_basic_measurements_avatar_id_idx

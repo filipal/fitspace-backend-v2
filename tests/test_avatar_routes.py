@@ -24,6 +24,11 @@ class ApplyPayloadTests(unittest.TestCase):
             "source": "Web",
             "quickMode": True,
             "createdBySession": "session-xyz",
+            "quickModeSettings": {
+                "bodyShape": "Hourglass",
+                "athleticLevel": "High",
+                "measurements": {"waistCircumference": 70.5},
+            },
         }
 
         result = routes._apply_payload(
@@ -45,6 +50,11 @@ class ApplyPayloadTests(unittest.TestCase):
             basic_measurements={},
             body_measurements={},
             morph_targets=[],
+            quick_mode_settings={
+                "bodyShape": "hourglass",
+                "athleticLevel": "high",
+                "measurements": {"waistCircumference": 70.5},
+            },
             user_context=self.user_context,
         )
 
@@ -78,6 +88,46 @@ class ApplyPayloadTests(unittest.TestCase):
             basic_measurements={"height": 172.4},
             body_measurements={"chest": 95.2},
             morph_targets=[],
+            quick_mode_settings=None,
+            user_context=None,
+        )
+
+    @patch("avatar.routes.repository.create_avatar")
+    def test_quick_mode_settings_enable_flag(self, mock_create):
+        expected_avatar = {"id": "avatar-4"}
+        mock_create.return_value = expected_avatar
+
+        payload = {
+            "name": "Sprinter",
+            "quickModeSettings": {
+                "bodyShape": "Pear",
+                "measurements": {"hipCircumference": 102.3},
+            },
+        }
+
+        result = routes._apply_payload(
+            self.user_id,
+            payload,
+            user_context=None,
+        )
+
+        self.assertIs(result, expected_avatar)
+        mock_create.assert_called_once_with(
+            self.user_id,
+            name="Sprinter",
+            gender=None,
+            age_range=None,
+            creation_mode=None,
+            source=None,
+            quick_mode=True,
+            created_by_session=None,
+            basic_measurements={},
+            body_measurements={},
+            morph_targets=[],
+            quick_mode_settings={
+                "bodyShape": "pear",
+                "measurements": {"hipCircumference": 102.3},
+            },
             user_context=None,
         )
 
@@ -112,6 +162,7 @@ class ApplyPayloadTests(unittest.TestCase):
             basic_measurements={},
             body_measurements={},
             morph_targets=[],
+            quick_mode_settings=None,
             user_context=None,
         )
 
@@ -132,6 +183,15 @@ class ApplyPayloadTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 400)
         self.assertIn("quickMode", ctx.exception.description)
+
+    def test_invalid_quick_mode_measurements(self):
+        payload = {"quickModeSettings": {"measurements": {"waist": "n/a"}}}
+
+        with self.assertRaises(HTTPException) as ctx:
+            routes._apply_payload(self.user_id, payload)
+
+        self.assertEqual(ctx.exception.code, 400)
+        self.assertIn("quickModeSettings.measurements", ctx.exception.description)
 
     def test_conflicting_creation_mode_values_rejected(self):
         payload = {
