@@ -21,7 +21,26 @@ avatar_bp = Blueprint("avatar", __name__, url_prefix="/api")
 _LIST_LIMIT = 5
 
 _ALLOWED_GENDERS = {"female", "male", "non_binary", "unspecified"}
-_ALLOWED_AGE_RANGES = {"child", "teen", "young_adult", "adult", "mature", "senior"}
+_AGE_RANGE_UI_LABELS = [
+    "15-19",
+    "20-29",
+    "30-39",
+    "40-49",
+    "50-59",
+    "60-69",
+    "70-79",
+    "80-89",
+    "90-99",
+]
+_ALLOWED_AGE_RANGES = {
+    "child",
+    "teen",
+    "young_adult",
+    "adult",
+    "mature",
+    "senior",
+    *{label.lower() for label in _AGE_RANGE_UI_LABELS},
+}
 _ALLOWED_CREATION_MODES = {"manual", "scan", "preset", "import"}
 _ALLOWED_SOURCES = {"web", "ios", "android", "kiosk", "api", "integration"}
 _MEASUREMENT_STATUS_KEYS = {"creationMode"}

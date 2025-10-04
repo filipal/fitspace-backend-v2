@@ -131,6 +131,39 @@ class ApplyPayloadTests(unittest.TestCase):
             user_context=None,
         )
 
+    @patch("avatar.routes.repository.create_avatar")
+    def test_ui_age_range_label_is_accepted(self, mock_create):
+        expected_avatar = {"id": "avatar-ui"}
+        mock_create.return_value = expected_avatar
+
+        payload = {
+            "name": "Marathoner",
+            "ageRange": "20-29",
+        }
+
+        result = routes._apply_payload(
+            self.user_id,
+            payload,
+            user_context=None,
+        )
+
+        self.assertIs(result, expected_avatar)
+        mock_create.assert_called_once_with(
+            self.user_id,
+            name="Marathoner",
+            gender=None,
+            age_range="20-29",
+            creation_mode=None,
+            source=None,
+            quick_mode=False,
+            created_by_session=None,
+            basic_measurements={},
+            body_measurements={},
+            morph_targets=[],
+            quick_mode_settings=None,
+            user_context=None,
+        )
+
     @patch("avatar.routes.repository.update_avatar")
     def test_update_defaults_and_validation(self, mock_update):
         expected_avatar = {"id": "avatar-2"}
