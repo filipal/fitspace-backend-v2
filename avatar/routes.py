@@ -54,6 +54,10 @@ _MEASUREMENT_STATUS_KEYS = {"creationMode"}
 def _enforce_authentication():
     """Ensure requests hitting the avatar blueprint are authenticated."""
 
+    if request.method == "OPTIONS":
+        # Allow CORS preflight requests to pass without authentication.
+        return None
+
     authenticate_request()
 
 
