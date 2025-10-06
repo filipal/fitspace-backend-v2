@@ -7,6 +7,9 @@ from werkzeug.exceptions import HTTPException
 from avatar import avatar_bp, init_app as init_avatar
 from auth import auth_bp, init_app as init_auth
 
+from dotenv import load_dotenv
+load_dotenv()
+
 app = Flask(__name__)
 
 
@@ -23,7 +26,7 @@ else:
 
 CORS(
     app,
-    resources={r"/api/*": {"origins": allowed_origins}},
+    resources={r"/api/*": {"origins": ["http://localhost:5177", "http://127.0.0.1:5177"]}},
     # supports_credentials=True  # uključi SAMO ako koristiš cookies; za Bearer ostavi isključeno
     allow_headers=[
         "Authorization",
@@ -33,6 +36,7 @@ CORS(
         "X-User-Email",
         "X-Session-Id",
         "X-Refresh-Token",
+        "X-User-Id",
     ],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     expose_headers=["Content-Disposition"],
