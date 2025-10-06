@@ -238,5 +238,43 @@ class ApplyPayloadTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 400)
         self.assertIn("creationMode", ctx.exception.description)
 
+
+class DeleteAvatarRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.user_id = "user-123"
+        self.avatar_id = "00000000-0000-0000-0000-000000000001"
+
+    def test_delete_success_returns_no_content(self):
+        with patch("avatar.routes.require_user_access") as mock_require, patch(
+            "avatar.routes.repository.delete_avatar"
+        ) as mock_delete:
+            response = routes.delete_avatar(self.user_id, self.avatar_id)
+
+        self.assertEqual(response, ("", 204))
+        mock_require.assert_called_once_with(self.user_id)
+        mock_delete.assert_called_once_with(self.user_id, self.avatar_id)
+
+    def test_delete_missing_avatar_returns_404(self):
+        with patch("avatar.routes.require_user_access") as mock_require, patch(
+            "avatar.routes.repository.delete_avatar",
+            side_effect=routes.AvatarNotFoundError("Avatar not found."),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                routes.delete_avatar(self.user_id, self.avatar_id)
+
+        self.assertEqual(ctx.exception.code, 404)
+        mock_require.assert_called_once_with(self.user_id)
+
+    def test_delete_invalid_identifier_returns_400(self):
+        with patch("avatar.routes.require_user_access") as mock_require, patch(
+            "avatar.routes.repository.delete_avatar",
+            side_effect=ValueError("invalid UUID"),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                routes.delete_avatar(self.user_id, "not-a-uuid")
+
+        self.assertEqual(ctx.exception.code, 400)
+        mock_require.assert_called_once_with(self.user_id)
+
 if __name__ == "__main__":
     unittest.main()

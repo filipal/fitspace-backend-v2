@@ -428,3 +428,15 @@ def update_avatar(user_id: str, avatar_id: str):
         user_context=user_context,
     )
     return jsonify(avatar)
+
+
+@avatar_bp.route("/users/<user_id>/avatars/<avatar_id>", methods=["DELETE"])
+def delete_avatar(user_id: str, avatar_id: str):
+    _require_user_scope(user_id)
+    try:
+        repository.delete_avatar(user_id, avatar_id)
+    except AvatarNotFoundError as exc:
+        abort(404, description=str(exc))
+    except ValueError:
+        abort(400, description="Avatar identifier is invalid.")
+    return "", 204

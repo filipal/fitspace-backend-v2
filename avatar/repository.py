@@ -717,3 +717,39 @@ def update_avatar(
             morphs=morphs,
             quick_mode_settings=quick_mode_data,
         )
+
+def delete_avatar(user_id: str, avatar_id: str) -> None:
+    avatar_uuid = uuid.UUID(avatar_id)
+
+    with _connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM avatars WHERE id = %s AND user_id = %s",
+                (avatar_uuid, user_id),
+            )
+            exists = cur.fetchone()
+
+        if not exists:
+            raise AvatarNotFoundError("Avatar not found.")
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM avatar_basic_measurements WHERE avatar_id = %s",
+                (avatar_uuid,),
+            )
+            cur.execute(
+                "DELETE FROM avatar_body_measurements WHERE avatar_id = %s",
+                (avatar_uuid,),
+            )
+            cur.execute(
+                "DELETE FROM avatar_morph_targets WHERE avatar_id = %s",
+                (avatar_uuid,),
+            )
+            cur.execute(
+                "DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s",
+                (avatar_uuid,),
+            )
+            cur.execute(
+                "DELETE FROM avatars WHERE id = %s AND user_id = %s",
+                (avatar_uuid, user_id),
+            )
