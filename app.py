@@ -1,10 +1,44 @@
+
++28
+-0
+
+import os
+
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
 from avatar import avatar_bp, init_app as init_avatar
 from auth import auth_bp, init_app as init_auth
 
 app = Flask(__name__)
+
+
+allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5177")
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+
+if not allowed_origins:
+    allowed_origins = ["http://localhost:5177"]
+
+if "*" in allowed_origins:
+    cors_origins = "*"
+else:
+    cors_origins = allowed_origins
+
+CORS(app, resources={
+    r"/api/*": {
+        "origins": cors_origins,
+        "allow_headers": [
+            "Content-Type",
+            "Accept",
+            "x-api-key",
+            "X-User-Email",
+            "X-Session-Id",
+            "X-Refresh-Token",
+        ],
+    }
+})
+
 init_auth(app)
 init_avatar(app)
 app.register_blueprint(auth_bp)
