@@ -1,7 +1,3 @@
-
-+28
--0
-
 import os
 
 from flask import Flask, jsonify, request
