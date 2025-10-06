@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import psycopg2
 from psycopg2 import errors
-from psycopg2.extras import Json, RealDictCursor
+from psycopg2.extras import Json, RealDictCursor, register_uuid
 from psycopg2.pool import SimpleConnectionPool
 
 
@@ -67,6 +67,7 @@ def _connection() -> Iterator[psycopg2.extensions.connection]:
 
     conn = _pool.getconn()
     try:
+        register_uuid(conn_or_curs=conn)
         conn.autocommit = False
         yield conn
         conn.commit()
