@@ -1,5 +1,8 @@
 -- Database schema for FitSpace avatar persistence.
 
+-- =========================
+-- Users
+-- =========================
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT,
@@ -12,14 +15,19 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Case-insensitive jedinstvo emaila (ako postoji)
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_key
     ON users (lower(email))
     WHERE email IS NOT NULL;
 
+-- Jedinstvo session_id (ako postoji)
 CREATE UNIQUE INDEX IF NOT EXISTS users_session_id_key
     ON users (session_id)
     WHERE session_id IS NOT NULL;
 
+-- =========================
+-- Avatars
+-- =========================
 CREATE TABLE IF NOT EXISTS avatars (
     id UUID PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -40,10 +48,13 @@ CREATE TABLE IF NOT EXISTS avatars (
     CONSTRAINT avatars_user_id_slot_key UNIQUE (user_id, slot)
 );
 
--- Enforce unique avatar names per user (case-insensitive).
+-- Jedinstveno ime avatara po useru (case-insensitive)
 CREATE UNIQUE INDEX IF NOT EXISTS avatars_user_id_name_key
     ON avatars (user_id, lower(name));
 
+-- =========================
+-- Measurements
+-- =========================
 CREATE TABLE IF NOT EXISTS avatar_basic_measurements (
     avatar_id UUID NOT NULL REFERENCES avatars(id) ON DELETE CASCADE,
     measurement_key TEXT NOT NULL,
@@ -58,6 +69,9 @@ CREATE TABLE IF NOT EXISTS avatar_body_measurements (
     PRIMARY KEY (avatar_id, measurement_key)
 );
 
+-- =========================
+-- Morph targets
+-- =========================
 CREATE TABLE IF NOT EXISTS morph_definitions (
     id TEXT PRIMARY KEY,
     backend_key TEXT,
@@ -75,6 +89,9 @@ CREATE TABLE IF NOT EXISTS avatar_morph_targets (
     PRIMARY KEY (avatar_id, morph_id)
 );
 
+-- =========================
+-- QuickMode settings
+-- =========================
 CREATE TABLE IF NOT EXISTS avatar_quickmode_settings (
     avatar_id UUID PRIMARY KEY REFERENCES avatars(id) ON DELETE CASCADE,
     body_shape TEXT,
@@ -84,9 +101,33 @@ CREATE TABLE IF NOT EXISTS avatar_quickmode_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- =========================
+-- Indeksi
+-- =========================
 CREATE INDEX IF NOT EXISTS avatar_basic_measurements_avatar_id_idx
     ON avatar_basic_measurements (avatar_id);
+
 CREATE INDEX IF NOT EXISTS avatar_body_measurements_avatar_id_idx
     ON avatar_body_measurements (avatar_id);
+
 CREATE INDEX IF NOT EXISTS avatar_morph_targets_avatar_id_idx
     ON avatar_morph_targets (avatar_id);
+
+-- (za često filtriraš po backend_key)
+CREATE INDEX IF NOT EXISTS avatar_morph_targets_backend_key_idx
+    ON avatar_morph_targets (backend_key);
+
+-- =========================
+-- Check constraints (idempotentno)
+-- =========================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'avatar_quickmode_settings_measurements_is_object'
+  ) THEN
+    ALTER TABLE avatar_quickmode_settings
+      ADD CONSTRAINT avatar_quickmode_settings_measurements_is_object
+      CHECK (measurements IS NULL OR jsonb_typeof(measurements) = 'object');
+  END IF;
+END$$;

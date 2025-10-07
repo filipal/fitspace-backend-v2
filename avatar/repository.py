@@ -197,6 +197,7 @@ def _persist_measurements(
     body: Dict[str, float],
     morph_targets: Iterable[Dict[str, Any]],
     quick_mode_settings: Optional[Dict[str, Any]],
+    quick_mode_settings_is_set: bool = False,
 ) -> None:
     basic = {k: v for k, v in basic.items() if k not in _MEASUREMENT_STATUS_KEYS}
     body = {k: v for k, v in body.items() if k not in _MEASUREMENT_STATUS_KEYS}
@@ -205,7 +206,6 @@ def _persist_measurements(
         cur.execute("DELETE FROM avatar_basic_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_body_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_morph_targets WHERE avatar_id = %s", (avatar_id,))
-        # cur.execute("DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,))
 
         if basic:
             cur.executemany(
@@ -289,50 +289,43 @@ def _persist_measurements(
             )
 
         # Quick mode settings: upsert (čuvamo created_at), ili brišemo ako nisu poslani
-        if quick_mode_settings:
-            body_shape = quick_mode_settings.get("bodyShape")
-            if isinstance(body_shape, str):
-                body_shape = body_shape.strip() or None
-            athletic_level = quick_mode_settings.get("athleticLevel")
-            if isinstance(athletic_level, str):
-                athletic_level = athletic_level.strip() or None
-            measurements = quick_mode_settings.get("measurements")
-            if not isinstance(measurements, dict):
-                measurements = {}
-            # updatedAt može doći iz klijenta; ako ga nema, koristimo server NOW()
-            updated_at_value = quick_mode_settings.get("updatedAt")
-            provided_updated_at = _coerce_datetime(updated_at_value)
-            effective_updated_at = provided_updated_at or datetime.now(timezone.utc)
-            cur.execute(
-                """
-                INSERT INTO avatar_quickmode_settings (
-                    avatar_id,
-                    body_shape,
-                    athletic_level,
-                    measurements,
-                    updated_at
+        if quick_mode_settings_is_set:
+            if quick_mode_settings:
+                body_shape = quick_mode_settings.get("bodyShape")
+                if isinstance(body_shape, str):
+                    body_shape = body_shape.strip() or None
+                athletic_level = quick_mode_settings.get("athleticLevel")
+                if isinstance(athletic_level, str):
+                    athletic_level = athletic_level.strip() or None
+                measurements = quick_mode_settings.get("measurements")
+                if not isinstance(measurements, dict):
+                    measurements = {}
+                # updatedAt može doći iz klijenta; ako ga nema, koristimo server NOW()
+                updated_at_value = quick_mode_settings.get("updatedAt")
+                provided_updated_at = _coerce_datetime(updated_at_value)
+                effective_updated_at = provided_updated_at or datetime.now(timezone.utc)
+
+                cur.execute(
+                    """
+                    INSERT INTO avatar_quickmode_settings (
+                        avatar_id, body_shape, athletic_level, measurements, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (avatar_id) DO UPDATE
+                    SET
+                        body_shape = EXCLUDED.body_shape,
+                        athletic_level = EXCLUDED.athletic_level,
+                        measurements = EXCLUDED.measurements,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (avatar_id, body_shape, athletic_level, Json(measurements), effective_updated_at),
                 )
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (avatar_id) DO UPDATE
-                SET
-                    body_shape = EXCLUDED.body_shape,
-                    athletic_level = EXCLUDED.athletic_level,
-                    measurements = EXCLUDED.measurements,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                (
-                    avatar_id,
-                    body_shape,
-                    athletic_level,
-                    Json(measurements),
-                    effective_updated_at,
-                ),
-            )
-        else:
-            # Ako quick_mode_settings uopće nisu poslani, izbriši eventualni stari red
-            cur.execute(
-                "DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,),
-            )
+            else:
+                # eksplicitno poslano kao null/prazno -> obriši
+                cur.execute(
+                    "DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s",
+                    (avatar_id,),
+                )
 def _fetch_measurements(
     conn, avatar_id: uuid.UUID
 ) -> Tuple[
@@ -563,6 +556,7 @@ def create_avatar(
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, Any]],
     quick_mode_settings: Optional[Dict[str, Any]],
+    quick_mode_settings_is_set: bool = False,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.uuid4()
@@ -630,6 +624,7 @@ def create_avatar(
             body=body_measurements,
             morph_targets=morph_targets,
             quick_mode_settings=quick_mode_settings,
+            quick_mode_settings_is_set=quick_mode_settings_is_set,
         )
 
         basic, body, morphs, quick_mode_data = _fetch_measurements(conn, avatar_uuid)
@@ -657,6 +652,7 @@ def update_avatar(
     body_measurements: Dict[str, float],
     morph_targets: List[Dict[str, Any]],
     quick_mode_settings: Optional[Dict[str, Any]],
+    quick_mode_settings_is_set: bool = False,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     avatar_uuid = uuid.UUID(avatar_id)
@@ -729,6 +725,7 @@ def update_avatar(
             body=body_measurements,
             morph_targets=morph_targets,
             quick_mode_settings=quick_mode_settings,
+            quick_mode_settings_is_set=quick_mode_settings_is_set,
         )
 
         basic, body, morphs, quick_mode_data = _fetch_measurements(conn, avatar_uuid)

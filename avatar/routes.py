@@ -16,6 +16,8 @@ from .repository import (
     DuplicateAvatarNameError,
 )
 
+_UNSET = object()
+
 avatar_bp = Blueprint("avatar", __name__, url_prefix="/api")
 
 # Maximum number of avatars returned from list endpoint.
@@ -315,7 +317,9 @@ def _apply_payload(
     creation_mode = _normalize_creation_mode(payload.get("creationMode"))
     source = _normalize_enum(payload.get("source"), field="source", allowed=_ALLOWED_SOURCES)
 
-    quick_mode_settings = _normalize_quick_mode_settings(payload.get("quickModeSettings"))
+    qms_raw = payload.get("quickModeSettings", _UNSET)
+    qms_is_set = (qms_raw is not _UNSET)
+    quick_mode_settings = _normalize_quick_mode_settings(qms_raw) if qms_is_set else None
 
     quick_mode_value = payload.get("quickMode")
     if quick_mode_value is None:
@@ -370,6 +374,7 @@ def _apply_payload(
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
                 quick_mode_settings=quick_mode_settings,
+                quick_mode_settings_is_set=qms_is_set,
                 user_context=user_context,
             )
         else:
@@ -387,6 +392,7 @@ def _apply_payload(
                 body_measurements=body_measurements,
                 morph_targets=morph_targets,
                 quick_mode_settings=quick_mode_settings,
+                quick_mode_settings_is_set=qms_is_set,
                 user_context=user_context,
             )
     except DuplicateAvatarNameError as exc:

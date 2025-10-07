@@ -57,6 +57,7 @@ class ApplyPayloadTests(unittest.TestCase):
                 "measurements": {"waistCircumference": 70.5},
                 "updatedAt": "2025-10-06T19:34:42.258317Z",
             },
+            quick_mode_settings_is_set=True,
             user_context=self.user_context,
         )
 
@@ -91,6 +92,7 @@ class ApplyPayloadTests(unittest.TestCase):
             body_measurements={"chest": 95.2},
             morph_targets=[],
             quick_mode_settings=None,
+            quick_mode_settings_is_set=False,
             user_context=None,
         )
 
@@ -130,6 +132,7 @@ class ApplyPayloadTests(unittest.TestCase):
                 "bodyShape": "pear",
                 "measurements": {"hipCircumference": 102.3},
             },
+            quick_mode_settings_is_set=True,
             user_context=None,
         )
 
@@ -163,6 +166,40 @@ class ApplyPayloadTests(unittest.TestCase):
             body_measurements={},
             morph_targets=[],
             quick_mode_settings=None,
+            quick_mode_settings_is_set=False,
+            user_context=None,
+        )
+
+    @patch("avatar.routes.repository.update_avatar")
+    def test_clear_quick_mode_settings(self, mock_update):
+        expected_avatar = {"id": "avatar-5"}
+        mock_update.return_value = expected_avatar
+
+        payload = {"quickModeSettings": None}
+
+        result = routes._apply_payload(
+            self.user_id,
+            payload,
+            avatar_id="00000000-0000-0000-0000-000000000001",
+            user_context=None,
+        )
+
+        self.assertIs(result, expected_avatar)
+        mock_update.assert_called_once_with(
+            self.user_id,
+            "00000000-0000-0000-0000-000000000001",
+            name="",
+            gender=None,
+            age_range=None,
+            creation_mode=None,
+            source=None,
+            quick_mode=False,
+            created_by_session=None,
+            basic_measurements={},
+            body_measurements={},
+            morph_targets=[],
+            quick_mode_settings=None,
+            quick_mode_settings_is_set=True,  # eksplicitno poslano, ali None => DELETE
             user_context=None,
         )
 
@@ -198,6 +235,7 @@ class ApplyPayloadTests(unittest.TestCase):
             body_measurements={},
             morph_targets=[],
             quick_mode_settings=None,
+            quick_mode_settings_is_set=False,
             user_context=None,
         )
 
