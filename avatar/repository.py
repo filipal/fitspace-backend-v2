@@ -205,7 +205,7 @@ def _persist_measurements(
         cur.execute("DELETE FROM avatar_basic_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_body_measurements WHERE avatar_id = %s", (avatar_id,))
         cur.execute("DELETE FROM avatar_morph_targets WHERE avatar_id = %s", (avatar_id,))
-        cur.execute("DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,))
+        # cur.execute("DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,))
 
         if basic:
             cur.executemany(
@@ -288,6 +288,7 @@ def _persist_measurements(
                 ],
             )
 
+        # Quick mode settings: upsert (čuvamo created_at), ili brišemo ako nisu poslani
         if quick_mode_settings:
             body_shape = quick_mode_settings.get("bodyShape")
             if isinstance(body_shape, str):
@@ -298,9 +299,10 @@ def _persist_measurements(
             measurements = quick_mode_settings.get("measurements")
             if not isinstance(measurements, dict):
                 measurements = {}
+            # updatedAt može doći iz klijenta; ako ga nema, koristimo server NOW()
             updated_at_value = quick_mode_settings.get("updatedAt")
             provided_updated_at = _coerce_datetime(updated_at_value)
-            timestamp = provided_updated_at or datetime.now(timezone.utc)
+            effective_updated_at = provided_updated_at or datetime.now(timezone.utc)
             cur.execute(
                 """
                 INSERT INTO avatar_quickmode_settings (
@@ -308,19 +310,28 @@ def _persist_measurements(
                     body_shape,
                     athletic_level,
                     measurements,
-                    created_at,
                     updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (avatar_id) DO UPDATE
+                SET
+                    body_shape = EXCLUDED.body_shape,
+                    athletic_level = EXCLUDED.athletic_level,
+                    measurements = EXCLUDED.measurements,
+                    updated_at = EXCLUDED.updated_at
                 """,
                 (
                     avatar_id,
                     body_shape,
                     athletic_level,
                     Json(measurements),
-                    timestamp,
-                    provided_updated_at or timestamp,
+                    effective_updated_at,
                 ),
+            )
+        else:
+            # Ako quick_mode_settings uopće nisu poslani, izbriši eventualni stari red
+            cur.execute(
+                "DELETE FROM avatar_quickmode_settings WHERE avatar_id = %s", (avatar_id,),
             )
 def _fetch_measurements(
     conn, avatar_id: uuid.UUID
