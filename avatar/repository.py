@@ -298,6 +298,9 @@ def _persist_measurements(
             measurements = quick_mode_settings.get("measurements")
             if not isinstance(measurements, dict):
                 measurements = {}
+            updated_at_value = quick_mode_settings.get("updatedAt")
+            provided_updated_at = _coerce_datetime(updated_at_value)
+            timestamp = provided_updated_at or datetime.now(timezone.utc)
             cur.execute(
                 """
                 INSERT INTO avatar_quickmode_settings (
@@ -308,9 +311,16 @@ def _persist_measurements(
                     created_at,
                     updated_at
                 )
-                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (avatar_id, body_shape, athletic_level, Json(measurements)),
+                (
+                    avatar_id,
+                    body_shape,
+                    athletic_level,
+                    Json(measurements),
+                    timestamp,
+                    provided_updated_at or timestamp,
+                ),
             )
 def _fetch_measurements(
     conn, avatar_id: uuid.UUID

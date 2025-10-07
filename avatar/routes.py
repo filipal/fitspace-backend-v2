@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable as IterableABC
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, abort, jsonify, request
@@ -106,6 +107,31 @@ def _normalize_float(value: Any, *, field: str) -> float:
         abort(400, description=f"{field} must be a number.")
     return result
 
+
+def _normalize_iso_timestamp(value: Optional[Any], *, field: str) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if not isinstance(value, str):
+        abort(400, description=f"{field} must be an ISO-8601 timestamp string.")
+    text = value.strip()
+    if not text:
+        return None
+    candidate = text
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        abort(400, description=f"{field} must be a valid ISO-8601 timestamp.")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _normalize_measurements(
     section: Optional[Dict[str, Any]], *, section_name: str
 ) -> Tuple[Dict[str, float], Dict[str, Optional[str]]]:
@@ -137,7 +163,7 @@ def _normalize_quick_mode_settings(payload: Optional[Any]) -> Optional[Dict[str,
     if not isinstance(payload, dict):
         abort(400, description="quickModeSettings must be an object.")
 
-    allowed_keys = {"bodyShape", "athleticLevel", "measurements"}
+    allowed_keys = {"bodyShape", "athleticLevel", "measurements", "updatedAt"}
     unexpected = [key for key in payload.keys() if key not in allowed_keys]
     if unexpected:
         joined = ", ".join(sorted(unexpected))
@@ -180,6 +206,9 @@ def _normalize_quick_mode_settings(payload: Optional[Any]) -> Optional[Dict[str,
         normalized["athleticLevel"] = athletic_level
     if measurements:
         normalized["measurements"] = measurements
+    updated_at = _normalize_iso_timestamp(payload.get("updatedAt"), field="quickModeSettings.updatedAt")
+    if updated_at:
+        normalized["updatedAt"] = updated_at
 
     return normalized or None
 

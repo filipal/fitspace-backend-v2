@@ -28,6 +28,7 @@ class ApplyPayloadTests(unittest.TestCase):
                 "bodyShape": "Hourglass",
                 "athleticLevel": "High",
                 "measurements": {"waistCircumference": 70.5},
+                "updatedAt": "2025-10-06T19:34:42.258317Z",
             },
         }
 
@@ -54,6 +55,7 @@ class ApplyPayloadTests(unittest.TestCase):
                 "bodyShape": "hourglass",
                 "athleticLevel": "high",
                 "measurements": {"waistCircumference": 70.5},
+                "updatedAt": "2025-10-06T19:34:42.258317Z",
             },
             user_context=self.user_context,
         )
@@ -225,6 +227,15 @@ class ApplyPayloadTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 400)
         self.assertIn("quickModeSettings.measurements", ctx.exception.description)
+
+    def test_invalid_quick_mode_updated_at(self):
+        payload = {"quickModeSettings": {"updatedAt": "not-a-date"}}
+
+        with self.assertRaises(HTTPException) as ctx:
+            routes._apply_payload(self.user_id, payload)
+
+        self.assertEqual(ctx.exception.code, 400)
+        self.assertIn("quickModeSettings.updatedAt", ctx.exception.description)
 
     def test_conflicting_creation_mode_values_rejected(self):
         payload = {
