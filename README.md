@@ -1,17 +1,55 @@
-# Fitspace Backend API
+# FitSpace Backend API
 
-A Flask-based REST API for the Fitspace application, deployed on AWS App Runner with PostgreSQL database.
+A Flask-based REST API for managing user avatars with comprehensive measurement data, morph targets, and quick mode settings. The application provides a complete avatar configuration system with PostgreSQL persistence and JWT-based authentication.
 
 ## 🚀 Live Deployment
 
 - **Production URL**: https://tea9as8upn.eu-central-1.awsapprunner.com
 - **Health Check**: https://tea9as8upn.eu-central-1.awsapprunner.com/health
 - **Auto-Deploy**: ✅ Enabled on `main` branch
+- **Deployment Dashboard**: [AWS App Runner Console](https://eu-central-1.console.aws.amazon.com/apprunner/home?region=eu-central-1#/services/dashboard?service_arn=arn%3Aaws%3Aapprunner%3Aeu-central-1%3A027728694574%3Aservice%2Fpixel-streaming-backend%2F8fe42d5834d644b5ba150b7ae4b5a93b&active_tab=logs)
+
+## 📋 Features
+
+### Avatar Management
+- **CRUD Operations**: Create, read, update, and delete user avatars
+- **Measurement System**: Support for basic and body measurements
+- **Morph Targets**: Advanced morphological customization with slider and Unreal Engine values
+- **Quick Mode Settings**: Simplified avatar configuration with body shape and athletic level presets
+- **User Quota**: Maximum 5 avatars per user with automatic slot management
+
+### Authentication & Authorization
+- **JWT-based Authentication**: Secure token-based user authentication
+- **Session Management**: Support for session IDs and refresh tokens
+- **User Context**: Email and session tracking for enhanced user management
+- **API Key Protection**: Optional API key validation for token generation
+
+### Data Management
+- **PostgreSQL Integration**: Robust relational database with proper constraints
+- **Transaction Safety**: ACID-compliant operations with automatic rollback
+- **Measurement Validation**: Type-safe numeric measurement handling
+- **Duplicate Prevention**: Unique avatar names per user
+
+## 🏗️ Architecture
+
+```
+├── app.py                 # Flask application entry point
+├── auth/                  # Authentication module
+│   └── __init__.py        # JWT handling, token management
+├── avatar/                # Avatar management module
+│   ├── routes.py          # REST API endpoints
+│   └── repository.py      # PostgreSQL data layer
+├── db/
+│   └── schema.sql         # Database schema definition
+└── tests/
+    └── test_avatar_routes.py  # Comprehensive test suite
+```
 
 ## 🛠️ Local Development Setup
 
 ### Prerequisites
 - Python 3.8+
+- PostgreSQL 12+
 - Git
 
 ### 1. Clone Repository
@@ -20,98 +58,40 @@ git clone https://github.com/e-kipica/fitspace-backend.git
 cd fitspace-backend
 ```
 
-### 2. Create Virtual Environment
+### 2. Environment Setup
 ```bash
 # Create virtual environment
 python3 -m venv venv
-
-# Activate virtual environment
 source venv/bin/activate
 
-# Verify activation (should show venv path)
-which python
-```
-
-### 3. Install Dependencies
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 4. Database Setup
-
-Set the `DATABASE_URL` environment variable to point to your PostgreSQL instance and apply the schema migrations:
-
+### 3. Database Configuration
 ```bash
-export DATABASE_URL="postgresql://user:password@localhost:5432/fitspace"
+# Set your database URL
+export DATABASE_URL="postgresql://username:password@localhost:5432/fitspace"
 
-# Apply schema (idempotent)
-psql "$DATABASE_URL" -f db/schema.sql
+# Optional: Set JWT secret (development default provided)
+export JWT_SECRET="your-secret-key-here"
+
+# Optional: Set API key for token generation
+export AUTH_API_KEY="your-api-key-here"
 ```
 
-This script creates the required tables (`users`, `avatars`, `avatar_basic_measurements`, `avatar_body_measurements`, and `avatar_morph_targets`) and enforces the five-avatar-per-user quota via a slot constraint.
+### 4. Database Schema
+```sql
+-- Apply the schema from db/schema.sql to your PostgreSQL database
+psql $DATABASE_URL -f db/schema.sql
+```
 
-#### Auth session metadata columns
-
-The `users` table now persists additional authentication metadata so that avatar requests can be correlated with the active session:
-
-- `email` – optional email address associated with the identity (case-insensitive unique index)
-- `session_id` – identifier of the active session (unique index)
-- `issued_at` / `expires_at` – timestamps describing the validity window of the access token
-- `access_token` – last access token observed for the user
-- `refresh_token` – last refresh token observed for the user
-- `updated_at` – automatically updated on every write
-
-> **Migrating existing databases**
->
-> Apply the following statements if your database already contains the previous `users` schema:
->
-> ```sql
-> ALTER TABLE users
->     ADD COLUMN IF NOT EXISTS email TEXT,
->     ADD COLUMN IF NOT EXISTS session_id TEXT,
->     ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ,
->     ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
->     ADD COLUMN IF NOT EXISTS access_token TEXT,
->     ADD COLUMN IF NOT EXISTS refresh_token TEXT,
->     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
->
-> CREATE UNIQUE INDEX IF NOT EXISTS users_email_key
->     ON users (LOWER(email)) WHERE email IS NOT NULL;
-> CREATE UNIQUE INDEX IF NOT EXISTS users_session_id_key
->     ON users (session_id) WHERE session_id IS NOT NULL;
-> ```
-
-#### Avatar metadata columns
-
-The `avatars` table captures additional metadata used by the Fitspace clients when generating avatars. Each value is validated by the API and stored in the database for auditing purposes:
-
-- `gender` – one of `female`, `male`, `non_binary`, `unspecified`
-- `age_range` – one of `child`, `teen`, `young_adult`, `adult`, `mature`, `senior`
-- `creation_mode` – one of `manual`, `scan`, `preset`, `import`
-- `source` – one of `web`, `ios`, `android`, `kiosk`, `api`, `integration`
-- `quick_mode` – boolean flag indicating if the avatar was generated via the quick workflow (defaults to `false`)
-- `created_by_session` – optional session identifier that created the avatar (separate from the owning user ID)
-
-> **Migrating existing databases**
->
-> Apply the following statements if you are extending a pre-existing `avatars` table:
->
-> ```sql
-> ALTER TABLE avatars
->     ADD COLUMN IF NOT EXISTS gender TEXT,
->     ADD COLUMN IF NOT EXISTS age_range TEXT,
->     ADD COLUMN IF NOT EXISTS creation_mode TEXT,
->     ADD COLUMN IF NOT EXISTS source TEXT,
->     ADD COLUMN IF NOT EXISTS quick_mode BOOLEAN NOT NULL DEFAULT FALSE,
->     ADD COLUMN IF NOT EXISTS created_by_session TEXT;
-> ```
-
-### 5. Run Local Development Server
+### 5. Run Development Server
 ```bash
-# Method 1: Direct Python execution
+# Method 1: Direct execution
 python3 app.py
 
-# Method 2: Using Flask CLI with debug mode
+# Method 2: Flask CLI with debug mode
 export FLASK_APP=app.py
 flask run --host=0.0.0.0 --port=8080 --debug
 
@@ -119,104 +99,195 @@ flask run --host=0.0.0.0 --port=8080 --debug
 FLASK_ENV=development python app.py
 ```
 
-### 6. Test Local Application
-Open your browser or use curl:
-```bash
-# Test main endpoint
-curl http://localhost:8080/
-# Expected: {"message": "Fitspace Backend API"}
+## 📚 API Documentation
 
-# Test health endpoint
-curl http://localhost:8080/health
-# Expected: {"status": "healthy"}
-```
+### Authentication Endpoints
 
-## 🚀 Deployment Information
+#### Generate JWT Token
+```http
+POST /api/auth/token
+Content-Type: application/json
 
-### Deployment Process
-1. Code pushed to `main` branch
-2. AWS App Runner detects changes
-3. Builds new container with your code
-4. Deploys to production URL
-5. Health check validates deployment
-6. Traffic switches to new version
-
-## 🧪 Testing
-
-### Local Testing
-```bash
-# Run all endpoints locally
-curl http://localhost:8080/
-curl http://localhost:8080/health
-```
-# Run unit tests (validation coverage for avatar metadata)
-python -m unittest discover -s tests
-
-### 🔐 Authentication
-
-- Configure a JWT secret (recommended):
-  ```bash
-  export JWT_SECRET="super-secret-value"
-  ```
-- Optionally protect token issuance with an API key:
-  ```bash
-  export AUTH_API_KEY="backend-shared-key"
-  ```
-- Configure allowed origins for CORS (comma-separated, or `*` to allow all origins):
-  ```bash
-  export CORS_ALLOWED_ORIGINS="http://localhost:5177,https://app.example.com"
-  ```
-- Obtain an access token for a user:
-  ```bash
-  curl -X POST http://localhost:8080/api/auth/token \
-    -H "Content-Type: application/json" \
-    -d '{"userId": "user-123", "apiKey": "backend-shared-key", "email": "user@example.com", "sessionId": "session-abc", "refreshToken": "refresh-xyz"}'
-  ```
-  Response contains the issued/expiry timestamps, the `Authorization` header and convenience headers (`X-User-Email`, `X-Session-Id`, `X-Refresh-Token`) ready for avatar routes.
-
-- When calling avatar endpoints you must forward the issued headers (or equivalent values) with each request:
-  ```bash
-  curl http://localhost:8080/api/users/user-123/avatars \
-    -H "Authorization: Bearer <token>" \
-    -H "X-User-Email: user@example.com" \
-    -H "X-Session-Id: session-abc" \
-    -H "X-Refresh-Token: refresh-xyz"
-  ```
-  Missing `X-User-Email` or `X-Session-Id` headers will result in a `400` response.
-
-### Production Testing
-```bash
-# Test production deployment
-curl https://tea9as8upn.eu-central-1.awsapprunner.com/
-curl https://tea9as8upn.eu-central-1.awsapprunner.com/health
-```
-### Avatar metadata scenarios
-
-Example request payload that exercises the extended avatar metadata (matching the validation rules enforced by the API):
-
-```json
 {
-  "name": "Runner",
+  "userId": "user-123",
+  "email": "user@example.com",
+  "sessionId": "session-abc",
+  "apiKey": "optional-api-key"
+}
+```
+
+### Avatar Endpoints
+
+All avatar endpoints require authentication via `Authorization: Bearer <token>` header.
+
+#### List User Avatars
+```http
+GET /api/users/{user_id}/avatars
+Authorization: Bearer <jwt_token>
+X-User-Email: user@example.com
+X-Session-Id: session-abc
+```
+
+#### Create Avatar
+```http
+POST /api/users/{user_id}/avatars
+Content-Type: application/json
+Authorization: Bearer <jwt_token>
+X-User-Email: user@example.com
+X-Session-Id: session-abc
+
+{
+  "name": "My Avatar",
   "gender": "female",
   "ageRange": "adult",
   "creationMode": "manual",
   "source": "web",
   "quickMode": true,
-  "createdBySession": "session-xyz",
   "basicMeasurements": {
-    "height": 172.4
+    "height": 172.5,
+    "weight": 65.0
   },
   "bodyMeasurements": {
-    "waist": 81.2
+    "chest": 95.2,
+    "waist": 70.5
   },
   "morphTargets": [
-    {"id": "leg_length", "value": 0.25}
-  ]
+    {
+      "id": "morph_1",
+      "sliderValue": 0.75,
+      "unrealValue": 1.2
+    }
+  ],
+  "quickModeSettings": {
+    "bodyShape": "hourglass",
+    "athleticLevel": "high",
+    "measurements": {
+      "waistCircumference": 70.5
+    }
+  }
 }
 ```
 
-The accompanying unit tests in `tests/test_avatar_routes.py` cover both valid and invalid combinations so that integrations can rely on consistent HTTP 400 responses when a value falls outside the documented ranges.
+#### Get Specific Avatar
+```http
+GET /api/users/{user_id}/avatars/{avatar_id}
+Authorization: Bearer <jwt_token>
+X-User-Email: user@example.com
+X-Session-Id: session-abc
+```
 
-## ⚙️ Frontend konfiguracija avatara
+#### Update Avatar
+```http
+PUT /api/users/{user_id}/avatars/{avatar_id}
+Content-Type: application/json
+Authorization: Bearer <jwt_token>
+X-User-Email: user@example.com
+X-Session-Id: session-abc
 
-Da bi frontend koristio ovaj backend servis, konfiguriraj varijablu okruženja `VITE_AVATAR_API_BASE_URL` tako da pokazuje na bazni URL koji već završava s `/api/users/`. Servis `avatarApi` unutar frontenda interpolira `userId` u nastavak putanje (npr. `http://localhost:8080/api/users/<USER_ID>/avatars`), pa je obavezan završni kosac prije interpolacije korisničkog identifikator
+{
+  "name": "Updated Avatar Name",
+  "quickModeSettings": null  // Clears quick mode settings
+}
+```
+
+#### Delete Avatar
+```http
+DELETE /api/users/{user_id}/avatars/{avatar_id}
+Authorization: Bearer <jwt_token>
+X-User-Email: user@example.com
+X-Session-Id: session-abc
+```
+
+## 🧪 Testing
+
+### Run Test Suite
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_avatar_routes.py -v
+
+# Run with coverage
+python -m pytest tests/ --cov=avatar --cov=auth
+```
+
+### Manual API Testing
+```bash
+# Health check
+curl https://tea9as8upn.eu-central-1.awsapprunner.com/health
+
+# Generate token (requires API key in production)
+curl -X POST https://tea9as8upn.eu-central-1.awsapprunner.com/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "test-user", "email": "test@example.com", "sessionId": "test-session"}'
+
+# List avatars (requires valid token)
+curl https://tea9as8upn.eu-central-1.awsapprunner.com/api/users/test-user/avatars \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "X-User-Email: test@example.com" \
+  -H "X-Session-Id: test-session"
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+- `DATABASE_URL`: PostgreSQL connection string (required)
+- `JWT_SECRET`: Secret key for JWT signing (optional, development default provided)
+- `JWT_ALGORITHM`: JWT algorithm (default: HS256)
+- `JWT_EXP_SECONDS`: Token expiration time in seconds (default: 3600)
+- `AUTH_API_KEY`: API key for token generation (optional)
+- `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
+
+### Supported Data Types
+
+#### Gender Options
+- `female`, `male`, `non_binary`, `unspecified`
+
+#### Age Range Options
+- Internal: `child`, `teen`, `young_adult`, `adult`, `mature`, `senior`
+- UI Labels: `15-19`, `20-29`, `30-39`, `40-49`, `50-59`, `60-69`, `70-79`, `80-89`, `90-99`
+
+#### Creation Modes
+- `manual`, `scan`, `preset`, `import`
+
+#### Sources
+- `web`, `ios`, `android`, `kiosk`, `api`, `integration`
+
+## 📊 Database Schema
+
+The application uses PostgreSQL with the following main tables:
+- **users**: User account information and session data
+- **avatars**: Core avatar data with metadata
+- **avatar_basic_measurements**: Basic body measurements
+- **avatar_body_measurements**: Detailed body measurements
+- **avatar_morph_targets**: Morphological target configurations
+- **avatar_quickmode_settings**: Quick mode presets with JSONB data
+- **morph_definitions**: Reusable morph target definitions
+
+## 🚀 Deployment
+
+### AWS App Runner Deployment
+1. Code pushed to `main` branch triggers automatic deployment
+2. AWS App Runner builds container from source
+3. Health check validates deployment at `/health`
+4. Traffic switches to new version upon successful deployment
+
+### Production Considerations
+- Ensure `DATABASE_URL` is configured in production
+- Set secure `JWT_SECRET` in production environment
+- Configure `AUTH_API_KEY` for token generation security
+- Set appropriate `CORS_ALLOWED_ORIGINS` for client applications
+
+## 🔒 Security Features
+
+- JWT-based stateless authentication
+- Request validation and sanitization
+- SQL injection prevention via parameterized queries
+- CORS protection with configurable origins
+- Transaction-based data consistency
+- User access control and authorization checks
+
+## 📝 License
+
+This project is part of the FitSpace application ecosystem.

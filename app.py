@@ -13,11 +13,11 @@ load_dotenv()
 app = Flask(__name__)
 
 
-allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5177,http://127.0.0.1:5177")
+allowed_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5177,http://127.0.0.1:5177,https://app.fitspace.fashion")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
 if not allowed_origins:
-    allowed_origins = ["http://localhost:5177"]
+    allowed_origins = ["http://localhost:5177", "https://app.fitspace.fashion"]
 
 if "*" in allowed_origins:
     cors_origins = "*"
@@ -26,13 +26,14 @@ else:
 
 CORS(
     app,
-    resources={r"/api/*": {"origins": ["http://localhost:5177", "http://127.0.0.1:5177"]}},
-    # supports_credentials=True  # uključi SAMO ako koristiš cookies; za Bearer ostavi isključeno
+    resources={
+        r"/*": {"origins": cors_origins}  # Allow all routes
+    },
     allow_headers=[
         "Authorization",
         "Content-Type",
         "Accept",
-        "x-api-key",
+        "x-api-key", 
         "X-User-Email",
         "X-Session-Id",
         "X-Refresh-Token",
@@ -40,7 +41,7 @@ CORS(
     ],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     expose_headers=["Content-Disposition"],
-    # supports_credentials=False  # uključi True SAMO ako koristiš cookies
+    supports_credentials=False
 )
 
 # ✅ Globalno pusti preflight
